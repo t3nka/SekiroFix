@@ -28,7 +28,9 @@
 - Open **`SekiroFix.ini`** to adjust settings.
 
 ## Screenshots
-![animated-comparison](.github/images/sekiro_comparison.png)
+| ![animated-comparison](.github/images/sekiro_comparison.png) |
+|:--------------------------:|
+| Gameplay
 
 ## Credits
 [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) for ASI loading. <br />
