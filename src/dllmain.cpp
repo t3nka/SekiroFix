@@ -370,12 +370,15 @@ void Framerate()
     {
         // Fullscreen Refresh Rate
         std::uint8_t* FullscreenRefreshRateScanResult = Memory::PatternScan(exeModule, "C7 ?? ?? 3C 00 00 00 48 ?? ?? ?? 01 00 00 00 4C ?? ?? ??");
-        if (FullscreenRefreshRateScanResult) {
+        std::uint8_t* FullscreenRefreshRateStartupScanResult = Memory::PatternScan(exeModule, "C7 45 ?? 3C 00 00 00 C7 45 ?? 01 00 00 00 48 8D ?? ??");
+        if (FullscreenRefreshRateScanResult && FullscreenRefreshRateStartupScanResult) {
             spdlog::info("Framerate: FS Refresh Rate: Address is {:s}+{:x}", sExeName.c_str(), FullscreenRefreshRateScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
             Memory::PatchBytes(FullscreenRefreshRateScanResult + 0x3, "\x00", 1);
+            spdlog::info("Framerate: FS Refresh Rate (Startup): Address is {:s}+{:x}", sExeName.c_str(), FullscreenRefreshRateStartupScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(FullscreenRefreshRateStartupScanResult + 0x3, "\x00", 1);
         }
         else {
-            spdlog::error("Framerate: FS Refresh Rate: Pattern scan failed.");
+            spdlog::error("Framerate: FS Refresh Rate: Pattern scan(s) failed.");
         } 
 
         // Framerate Cap
