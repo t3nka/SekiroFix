@@ -47,6 +47,7 @@ float fHUDHeightOffset;
 // Ini variables
 bool bBorderlessWindowed;
 bool bUnlockResolutions;
+bool bUnlockFPS;
 bool bFixAspect;
 bool bFixHUD;
 float fGameplayFOVMulti;
@@ -172,6 +173,7 @@ void Configuration()
     // Load settings from ini
     inipp::get_value(ini.sections["Borderless Windowed"], "Enabled", bBorderlessWindowed);
     inipp::get_value(ini.sections["Gameplay FOV"], "Multiplier", fGameplayFOVMulti);
+    inipp::get_value(ini.sections["Unlock Framerate"], "Enabled", bUnlockFPS);
     inipp::get_value(ini.sections["Unlock Resolutions"], "Enabled", bUnlockResolutions);
     inipp::get_value(ini.sections["Fix Aspect Ratio"], "Enabled", bFixAspect);
     inipp::get_value(ini.sections["Fix HUD"], "Enabled", bFixHUD);
@@ -182,6 +184,7 @@ void Configuration()
     // Log ini parse
     spdlog_confparse(bBorderlessWindowed);
     spdlog_confparse(fGameplayFOVMulti);
+    spdlog_confparse(bUnlockFPS);
     spdlog_confparse(bUnlockResolutions);
     spdlog_confparse(bFixAspect);
     spdlog_confparse(bFixHUD);
@@ -363,47 +366,60 @@ void HUD()
 
 void Framerate()
 {
-    // Framerate Cap
-    std::uint8_t* FramerateCapScanResult = Memory::PatternScan(exeModule, "F3 0F ?? ?? ?? 0F ?? ?? 48 8B ?? ?? ?? ?? ?? 0F 57 ?? F2 ?? ?? ?? ??");
-    if (FramerateCapScanResult) {
-        spdlog::info("Framerate: Cap: Address is {:s}+{:x}", sExeName.c_str(), FramerateCapScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        Memory::PatchBytes(FramerateCapScanResult, "\x0F\x57\xC0\x90\x90", 5); // movss xmm0,[rbx+18] -> xorps xmm0,xmm0
-    }
-    else {
-        spdlog::error("Framerate: Cap: Pattern scan failed.");
-    } 
+    if (bUnlockFPS) 
+    {
+        // Fullscreen Refresh Rate
+        std::uint8_t* FullscreenRefreshRateScanResult = Memory::PatternScan(exeModule, "C7 ?? ?? 3C 00 00 00 48 ?? ?? ?? 01 00 00 00 4C ?? ?? ??");
+        if (FullscreenRefreshRateScanResult) {
+            spdlog::info("Framerate: FS Refresh Rate: Address is {:s}+{:x}", sExeName.c_str(), FullscreenRefreshRateScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(FullscreenRefreshRateScanResult + 0x3, "\x00", 1);
+        }
+        else {
+            spdlog::error("Framerate: FS Refresh Rate: Pattern scan failed.");
+        } 
 
-    // Current Framerate
-    std::uint8_t* CurrentFramerateScanResult = Memory::PatternScan(exeModule, "F3 0F ?? ?? ?? 4C ?? ?? ?? ?? 48 ?? ?? ?? ?? 0F ?? ?? F3 ?? ?? ?? ??");
-    if (CurrentFramerateScanResult) {
-        spdlog::info("Framerate: Current Framerate: Address is {:s}+{:x}", sExeName.c_str(), CurrentFramerateScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        static SafetyHookMid CurrentFramerateMidHook{};
-        CurrentFramerateMidHook = safetyhook::create_mid(CurrentFramerateScanResult ,
-            [](SafetyHookContext& ctx) {
-                fCurrentFramerate = 1.00f / ctx.xmm3.f32[0];
-            });
-    }
-    else {
-        spdlog::error("Framerate: Current Framerate: Pattern scan failed.");
-    } 
+        // Framerate Cap
+        std::uint8_t* FramerateCapScanResult = Memory::PatternScan(exeModule, "F3 0F ?? ?? ?? 0F ?? ?? 48 8B ?? ?? ?? ?? ?? 0F 57 ?? F2 ?? ?? ?? ??");
+        if (FramerateCapScanResult) {
+            spdlog::info("Framerate: Cap: Address is {:s}+{:x}", sExeName.c_str(), FramerateCapScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(FramerateCapScanResult, "\x0F\x57\xC0\x90\x90", 5); // movss xmm0,[rbx+18] -> xorps xmm0,xmm0
+        }
+        else {
+            spdlog::error("Framerate: Cap: Pattern scan failed.");
+        } 
 
-    // Sprint Speed
-    std::uint8_t* PlayerCtrlSprintSpeedScanResult = Memory::PatternScan(exeModule, "76 ?? F3 0F ?? ?? ?? ?? ?? ?? 0F ?? ?? ?? ?? ?? ?? 76 ?? F3 0F ?? ?? ?? ?? ?? ??");
-    if (PlayerCtrlSprintSpeedScanResult) {
-        spdlog::info("Framerate: Sprint Speed: Address is {:s}+{:x}", sExeName.c_str(), PlayerCtrlSprintSpeedScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        static SafetyHookMid PlayerCtrlSpeedMidHook{};
-        PlayerCtrlSpeedMidHook = safetyhook::create_mid(PlayerCtrlSprintSpeedScanResult,
-            [](SafetyHookContext& ctx) {
-                // Not exactly sure what this code section is doing. It looks it's comparing some sort of movement delta and that delta becomes so miniscule
-                // at high framerates that it causes the game to slow down your sprint speed.
-                // Whatever it is, let's just skip over it at >60fps.
-                if (fCurrentFramerate > 60.00f)
-                    ctx.rflags |= (1ULL << 6);
-            });
+        // Current Framerate
+        std::uint8_t* CurrentFramerateScanResult = Memory::PatternScan(exeModule, "F3 0F ?? ?? ?? 4C ?? ?? ?? ?? 48 ?? ?? ?? ?? 0F ?? ?? F3 ?? ?? ?? ??");
+        if (CurrentFramerateScanResult) {
+            spdlog::info("Framerate: Current Framerate: Address is {:s}+{:x}", sExeName.c_str(), CurrentFramerateScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            static SafetyHookMid CurrentFramerateMidHook{};
+            CurrentFramerateMidHook = safetyhook::create_mid(CurrentFramerateScanResult ,
+                [](SafetyHookContext& ctx) {
+                    fCurrentFramerate = 1.00f / ctx.xmm3.f32[0];
+                });
+        }
+        else {
+            spdlog::error("Framerate: Current Framerate: Pattern scan failed.");
+        } 
+
+        // Sprint Speed
+        std::uint8_t* PlayerCtrlSprintSpeedScanResult = Memory::PatternScan(exeModule, "76 ?? F3 0F ?? ?? ?? ?? ?? ?? 0F ?? ?? ?? ?? ?? ?? 76 ?? F3 0F ?? ?? ?? ?? ?? ??");
+        if (PlayerCtrlSprintSpeedScanResult) {
+            spdlog::info("Framerate: Sprint Speed: Address is {:s}+{:x}", sExeName.c_str(), PlayerCtrlSprintSpeedScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            static SafetyHookMid PlayerCtrlSpeedMidHook{};
+            PlayerCtrlSpeedMidHook = safetyhook::create_mid(PlayerCtrlSprintSpeedScanResult,
+                [](SafetyHookContext& ctx) {
+                    // Not exactly sure what this code section is doing. It looks like it's comparing some sort of movement delta and that delta becomes so miniscule
+                    // at high framerates that it causes the game to slow down your sprint speed.
+                    // Whatever it is, let's just skip over it at >60fps.
+                    if (fCurrentFramerate > 60.00f)
+                        ctx.rflags |= (1ULL << 6);
+                });
+        }
+        else {
+            spdlog::error("Framerate: Sprint Speed: Pattern scan failed.");
+        } 
     }
-    else {
-        spdlog::error("Framerate: Sprint Speed: Pattern scan failed.");
-    } 
 }
 
 DWORD __stdcall Main(void*)
