@@ -50,6 +50,8 @@ bool bUnlockResolutions;
 bool bUnlockFPS;
 bool bFixAspect;
 bool bFixHUD;
+bool bDisableCameraReset;
+bool bAutoLoot;
 float fGameplayFOVMulti;
 
 // Variables
@@ -173,6 +175,8 @@ void Configuration()
     // Load settings from ini
     inipp::get_value(ini.sections["Borderless Windowed"], "Enabled", bBorderlessWindowed);
     inipp::get_value(ini.sections["Gameplay FOV"], "Multiplier", fGameplayFOVMulti);
+    inipp::get_value(ini.sections["Disable Camera Reset"], "Enabled", bDisableCameraReset);
+    inipp::get_value(ini.sections["Auto Loot"], "Enabled", bAutoLoot);
     inipp::get_value(ini.sections["Unlock Framerate"], "Enabled", bUnlockFPS);
     inipp::get_value(ini.sections["Unlock Resolutions"], "Enabled", bUnlockResolutions);
     inipp::get_value(ini.sections["Fix Aspect Ratio"], "Enabled", bFixAspect);
@@ -184,6 +188,8 @@ void Configuration()
     // Log ini parse
     spdlog_confparse(bBorderlessWindowed);
     spdlog_confparse(fGameplayFOVMulti);
+    spdlog_confparse(bDisableCameraReset);
+    spdlog_confparse(bAutoLoot);
     spdlog_confparse(bUnlockFPS);
     spdlog_confparse(bUnlockResolutions);
     spdlog_confparse(bFixAspect);
@@ -364,6 +370,35 @@ void HUD()
     } 
 }
 
+void Gameplay()
+{
+    if (bDisableCameraReset)
+    {
+        // Disable camera centering/reset when lock-on is pressed with no valid target.
+        std::uint8_t* CameraResetScanResult = Memory::PatternScan(exeModule, "C6 86 ?? ?? 00 00 ?? F3 0F 10 8E ?? ?? 00 00");
+        if (CameraResetScanResult) {
+            spdlog::info("Gameplay: Disable Camera Reset: Address is {:s}+{:x}", sExeName.c_str(), CameraResetScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(CameraResetScanResult + 0x6, "\x00", 1);
+        }
+        else {
+            spdlog::error("Gameplay: Disable Camera Reset: Pattern scan failed.");
+        }
+    }
+
+    if (bAutoLoot)
+    {
+        // Force the loot pickup check to behave as if pickup is active.
+        std::uint8_t* AutoLootScanResult = Memory::PatternScan(exeModule, "C6 85 ?? ?? ?? ?? ?? B0 01 EB ?? C6 85 ?? ?? ?? ?? ?? 32 C0");
+        if (AutoLootScanResult) {
+            spdlog::info("Gameplay: Auto Loot: Address is {:s}+{:x}", sExeName.c_str(), AutoLootScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(AutoLootScanResult + 0x12, "\xB0\x01", 2);
+        }
+        else {
+            spdlog::error("Gameplay: Auto Loot: Pattern scan failed.");
+        }
+    }
+}
+
 void Framerate()
 {
     if (bUnlockFPS) 
@@ -433,6 +468,7 @@ DWORD __stdcall Main(void*)
     AspectRatio();
     FOV();
     HUD();
+    Gameplay();
     Framerate();
     return true;
 }

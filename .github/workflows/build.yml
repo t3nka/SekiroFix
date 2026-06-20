@@ -1,0 +1,32 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up xmake
+        uses: xmake-io/github-action-setup-xmake@v1
+
+      - name: Build release
+        run: |
+          xmake f -p windows -a x64 -m release -y
+          xmake -y
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SekiroFix-windows-x64
+          path: |
+            build/**/*.asi
+            SekiroFix.ini
