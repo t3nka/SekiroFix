@@ -3,8 +3,11 @@
 - Extract the contents of the release zip in to the the game folder. (e.g **steamapps\common\Sekiro** for Steam)
 
 ## Changes
-- Added an optional camera reset disable.
-- Added an optional auto loot patch.
+- Added optional Dragonrot prevention.
+- Added optional Sen and Skill Experience death penalty prevention.
+- Added optional death and kill counter text logging.
+- Added optional prosthetic upgrade Spirit Emblem capacity increases.
+- Updated the included configuration and README for the new gameplay options.
   
 ### Steam Deck/Linux Additional Instructions
 **You do not need to do this if you are using Windows!**

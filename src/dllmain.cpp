@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.1";
+std::string sFixVersion = "0.0.3";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -52,12 +52,50 @@ bool bFixAspect;
 bool bFixHUD;
 bool bDisableCameraReset;
 bool bAutoLoot;
+bool bPreventDragonrot;
+bool bDisableDeathPenalties;
+bool bLogStats;
+bool bSpiritEmblemUpgrade;
 float fGameplayFOVMulti;
 
 // Variables
 int iCurrentResX;
 int iCurrentResY;
 float fCurrentFramerate;
+std::uint8_t* pPlayerDeaths;
+std::uint8_t* pTotalKills;
+
+bool IsReadableAddress(std::uint8_t* address, size_t size)
+{
+    if (!address || reinterpret_cast<uintptr_t>(address) < 0x10000 || reinterpret_cast<uintptr_t>(address) >= 0x000F000000000000)
+        return false;
+
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(address, &mbi, sizeof(mbi)))
+        return false;
+
+    if (mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) || (mbi.Protect & PAGE_NOACCESS))
+        return false;
+
+    return reinterpret_cast<uintptr_t>(address) + size <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+}
+
+template<typename T>
+bool ReadMemory(std::uint8_t* address, T& value)
+{
+    if (!IsReadableAddress(address, sizeof(T)))
+        return false;
+
+    __try
+    {
+        value = *reinterpret_cast<T*>(address);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
 
 void CalculateAspectRatio(bool bLog)
 {
@@ -177,6 +215,10 @@ void Configuration()
     inipp::get_value(ini.sections["Gameplay FOV"], "Multiplier", fGameplayFOVMulti);
     inipp::get_value(ini.sections["Disable Camera Reset"], "Enabled", bDisableCameraReset);
     inipp::get_value(ini.sections["Auto Loot"], "Enabled", bAutoLoot);
+    inipp::get_value(ini.sections["Prevent Dragonrot"], "Enabled", bPreventDragonrot);
+    inipp::get_value(ini.sections["Disable Death Penalties"], "Enabled", bDisableDeathPenalties);
+    inipp::get_value(ini.sections["Log Stats"], "Enabled", bLogStats);
+    inipp::get_value(ini.sections["Spirit Emblem Upgrade"], "Enabled", bSpiritEmblemUpgrade);
     inipp::get_value(ini.sections["Unlock Framerate"], "Enabled", bUnlockFPS);
     inipp::get_value(ini.sections["Unlock Resolutions"], "Enabled", bUnlockResolutions);
     inipp::get_value(ini.sections["Fix Aspect Ratio"], "Enabled", bFixAspect);
@@ -190,6 +232,10 @@ void Configuration()
     spdlog_confparse(fGameplayFOVMulti);
     spdlog_confparse(bDisableCameraReset);
     spdlog_confparse(bAutoLoot);
+    spdlog_confparse(bPreventDragonrot);
+    spdlog_confparse(bDisableDeathPenalties);
+    spdlog_confparse(bLogStats);
+    spdlog_confparse(bSpiritEmblemUpgrade);
     spdlog_confparse(bUnlockFPS);
     spdlog_confparse(bUnlockResolutions);
     spdlog_confparse(bFixAspect);
@@ -397,6 +443,137 @@ void Gameplay()
             spdlog::error("Gameplay: Auto Loot: Pattern scan failed.");
         }
     }
+
+    if (bPreventDragonrot)
+    {
+        // Skip the Dragonrot increase path after death.
+        std::uint8_t* DragonrotScanResult = Memory::PatternScan(exeModule, "45 ?? ?? BA ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 85 C9 75 ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 4C ?? ?? 4C ?? ?? ?? ?? ?? ?? BA ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 45 ?? ?? BA ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8D");
+        if (DragonrotScanResult) {
+            spdlog::info("Gameplay: Prevent Dragonrot: Address is {:s}+{:x}", sExeName.c_str(), DragonrotScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(DragonrotScanResult + 0x0D, "\x90\x90\x90\xE9", 4);
+        }
+        else {
+            spdlog::error("Gameplay: Prevent Dragonrot: Pattern scan failed.");
+        }
+    }
+
+    if (bDisableDeathPenalties)
+    {
+        // Disable modern Sen/XP loss regions when dying.
+        std::uint8_t* DeathPenaltySenScanResult = Memory::PatternScan(exeModule, "F3 ?? 0F 2C ?? 41 ?? ?? 48 ?? ?? E8 ?? ?? ?? ?? 8B");
+        if (DeathPenaltySenScanResult) {
+            spdlog::info("Gameplay: Disable Death Penalties: Sen Address is {:s}+{:x}", sExeName.c_str(), DeathPenaltySenScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(DeathPenaltySenScanResult + 0x0B, "\x90\x90\x90\x90\x90", 5);
+        }
+        else {
+            spdlog::error("Gameplay: Disable Death Penalties: Sen pattern scan failed.");
+        }
+
+        std::uint8_t* DeathPenaltyXpScanResult = Memory::PatternScan(exeModule, "E8 ?? ?? ?? ?? 45 ?? ?? 44 89 ?? 24 ?? ?? 00 00 8B ?? 24 ?? ?? 00 00 2B ?? 89 ?? 24 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 ?? ?? 24 ?? ?? 00 00 48 ?? ?? 48");
+        if (DeathPenaltyXpScanResult) {
+            spdlog::info("Gameplay: Disable Death Penalties: XP Address is {:s}+{:x}", sExeName.c_str(), DeathPenaltyXpScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            Memory::PatchBytes(DeathPenaltyXpScanResult, "\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90\x90", 32);
+            Memory::PatchBytes(DeathPenaltyXpScanResult + 0x2D, "\x90\x90\x90", 3);
+        }
+        else {
+            spdlog::error("Gameplay: Disable Death Penalties: XP pattern scan failed.");
+        }
+    }
+
+    if (bSpiritEmblemUpgrade)
+    {
+        // Treat prosthetic upgrade skill effects as a +1 Spirit Emblem capacity upgrade.
+        std::uint8_t* SpiritEmblemUpgradeScanResult = Memory::PatternScan(exeModule, "48 85 C0 74 ?? 0F B6 50 37 85 D2 74 ?? 48 8B 0D");
+        if (SpiritEmblemUpgradeScanResult) {
+            spdlog::info("Gameplay: Spirit Emblem Upgrade: Address is {:s}+{:x}", sExeName.c_str(), SpiritEmblemUpgradeScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+            static SafetyHookMid SpiritEmblemUpgradeMidHook{};
+            SpiritEmblemUpgradeMidHook = safetyhook::create_mid(SpiritEmblemUpgradeScanResult + 0x09,
+                [](SafetyHookContext& ctx) {
+                    std::uint32_t skillFamily = 0;
+                    if (ReadMemory(reinterpret_cast<std::uint8_t*>(ctx.rax) + 0x30, skillFamily) && skillFamily == 0x2932E0)
+                        ctx.rdx = (ctx.rdx & 0xFFFFFFFF00000000ULL) | 1;
+                });
+        }
+        else {
+            spdlog::error("Gameplay: Spirit Emblem Upgrade: Pattern scan failed.");
+        }
+    }
+}
+
+DWORD __stdcall StatsThread(void*)
+{
+    while (true)
+    {
+        int deaths = 0;
+        int totalKills = 0;
+
+        if (ReadMemory(pPlayerDeaths, deaths) && ReadMemory(pTotalKills, totalKills))
+        {
+            int kills = std::max(totalKills - deaths, 0);
+
+            std::ofstream deathsFile(sExePath / "DeathCounter.txt", std::ios::trunc);
+            if (deathsFile.is_open())
+                deathsFile << deaths;
+
+            std::ofstream killsFile(sExePath / "TotalKillsCounter.txt", std::ios::trunc);
+            if (killsFile.is_open())
+                killsFile << kills;
+        }
+        else {
+            spdlog::error("Stats: Failed to read counter pointer(s).");
+        }
+
+        Sleep(2000);
+    }
+}
+
+void Stats()
+{
+    if (!bLogStats)
+        return;
+
+    std::uint8_t* PlayerDeathsScanResult = Memory::PatternScan(exeModule, "0F B6 48 ?? 88 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00 89 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00");
+    if (PlayerDeathsScanResult) {
+        std::uint8_t* playerStatsRelatedRef = Memory::GetAbsolute(PlayerDeathsScanResult + 0x20);
+        std::uint8_t* playerStatsRelated = nullptr;
+        std::int32_t deathOffset = 0;
+
+        if (ReadMemory(playerStatsRelatedRef, playerStatsRelated) && ReadMemory(PlayerDeathsScanResult + 0x26, deathOffset)) {
+            pPlayerDeaths = playerStatsRelated + deathOffset;
+            spdlog::info("Stats: Player Deaths: Address is {:s}+{:x}", sExeName.c_str(), PlayerDeathsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+        }
+        else {
+            spdlog::error("Stats: Player Deaths: Failed to resolve pointer.");
+        }
+    }
+    else {
+        spdlog::error("Stats: Player Deaths: Pattern scan failed.");
+    }
+
+    std::uint8_t* TotalKillsScanResult = Memory::PatternScan(exeModule, "48 ?? D8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 ?? ?? 48 89 ?? ?? ?? 48 8B ?? 08");
+    if (TotalKillsScanResult) {
+        std::uint8_t* totalKillsRef = Memory::GetAbsolute(TotalKillsScanResult + 0x0A);
+        std::uint8_t* totalKillsFirst = nullptr;
+        std::uint8_t* totalKillsSecond = nullptr;
+
+        if (ReadMemory(totalKillsRef, totalKillsFirst) && totalKillsFirst && ReadMemory(totalKillsFirst + 0x08, totalKillsSecond)) {
+            pTotalKills = totalKillsSecond + 0x00DC;
+            spdlog::info("Stats: Total Kills: Address is {:s}+{:x}", sExeName.c_str(), TotalKillsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+        }
+        else {
+            spdlog::error("Stats: Total Kills: Failed to resolve pointer.");
+        }
+    }
+    else {
+        spdlog::error("Stats: Total Kills: Pattern scan failed.");
+    }
+
+    if (!pPlayerDeaths || !pTotalKills)
+        return;
+
+    HANDLE statsHandle = CreateThread(NULL, 0, StatsThread, 0, NULL, 0);
+    if (statsHandle)
+        CloseHandle(statsHandle);
 }
 
 void Framerate()
@@ -469,6 +646,7 @@ DWORD __stdcall Main(void*)
     FOV();
     HUD();
     Gameplay();
+    Stats();
     Framerate();
     return true;
 }
