@@ -1,6 +1,10 @@
 ## Installation  
 - Download the file marked `<RELEASE_ZIP_NAME>` from the "Downloads" section below.
 - Extract the contents of the release zip in to the the game folder. (e.g **steamapps\common\Sekiro** for Steam)
+
+## Changes
+- Added an optional camera reset disable.
+- Added an optional auto loot patch.
   
 ### Steam Deck/Linux Additional Instructions
 **You do not need to do this if you are using Windows!**

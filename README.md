@@ -9,6 +9,8 @@
 - Unlock framerate.
 - Adjust gameplay FOV.
 - Borderless windowed mode.
+- Disable camera reset when locking on with no valid target.
+- Automatically pick up enemy loot.
 
 ### Ultrawide/Narrower
 - Support for any aspect ratio.
@@ -26,6 +28,8 @@
 
 ## Configuration
 - Open **`SekiroFix.ini`** to adjust settings.
+- Set **`[Disable Camera Reset] Enabled = true`** to stop camera centering when lock-on is pressed without a target.
+- Set **`[Auto Loot] Enabled = true`** to automatically pick up enemy loot.
 
 ## Screenshots
 | ![animated-comparison](.github/images/sekiro_comparison.png) |
