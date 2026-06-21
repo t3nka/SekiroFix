@@ -285,7 +285,7 @@ void* SekiroArchivePathDetour(SekiroString* path, std::uint64_t p2, std::uint64_
     return result;
 }
 
-void LogResourcePathCandidateCall(size_t candidateIndex, std::uint8_t* candidateAddress, SafetyHookContext& ctx)
+void LogResourcePathCandidateCall(SafetyHookContext& ctx)
 {
     const auto callCount = ++ResourcePathCandidateCallCount;
     const auto* path = reinterpret_cast<SekiroString*>(ctx.rcx);
@@ -296,16 +296,13 @@ void LogResourcePathCandidateCall(size_t candidateIndex, std::uint8_t* candidate
 
     if (interesting) {
         std::ostringstream label;
-        label << "candidate #" << candidateIndex << " input";
+        label << "candidate input";
         LogResourcePath(label.str(), path ? &path->string : nullptr);
     }
 
     if (interesting || callCount <= 128 || callCount % 1000 == 0) {
-        spdlog::info("Resource Path Candidate: call #{:d}: candidate #{} at {:s}+{:x}: path {:s}; p4 {:s}; rdx={:s}; r8={:s}",
+        spdlog::info("Resource Path Candidate: call #{:d}: path {:s}; p4 {:s}; rdx={:s}; r8={:s}",
             callCount,
-            candidateIndex,
-            sExeName.c_str(),
-            candidateAddress - reinterpret_cast<std::uint8_t*>(exeModule),
             DescribeDLString(path ? &path->string : nullptr),
             DescribeDLString(p4),
             HexValue(static_cast<uintptr_t>(ctx.rdx)),
@@ -600,9 +597,7 @@ void ResourcePathLogging()
         std::uint8_t* candidate = candidates[i];
         spdlog::info("Resource Path Candidate: candidate #{} address is {:s}+{:x}", i, sExeName.c_str(), candidate - reinterpret_cast<std::uint8_t*>(exeModule));
 
-        auto hook = safetyhook::create_mid(candidate, [i, candidate](SafetyHookContext& ctx) {
-            LogResourcePathCandidateCall(i, candidate, ctx);
-        });
+        auto hook = safetyhook::create_mid(candidate, LogResourcePathCandidateCall);
 
         if (hook) {
             spdlog::info("Resource Path Candidate: candidate #{} hook installed.", i);
