@@ -339,9 +339,9 @@ void AspectRatio()
             AwarenessMarkersTransitionHorMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult,
                 [](SafetyHookContext& ctx) {
                     if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm1.f32[0] = -99999.00f;
+                        // Test hide mode: keep markers mathematically onscreen, but collapse them into a tiny top-left area.
+                        ctx.xmm0.f32[0] = 0.00f;
+                        ctx.xmm1.f32[0] = 1.00f;
                     }
                     else if (fAspectRatio > fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
@@ -353,9 +353,9 @@ void AspectRatio()
             AwarenessMarkersTransitionVertMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult + 0x2A,
                 [](SafetyHookContext& ctx) {
                     if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm4.f32[0] = -99999.00f;
+                        // Test hide mode: keep markers mathematically onscreen, but collapse them into a tiny top-left area.
+                        ctx.xmm0.f32[0] = 0.00f;
+                        ctx.xmm4.f32[0] = 1.00f;
                     }
                     else if (fAspectRatio < fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
@@ -367,12 +367,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersCullingMidHook{};
             AwarenessMarkersCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Shrink marker culling bounds so awareness markers fail their visibility tests.
-                        ctx.xmm2.f32[0] = -100000.00f;
-                        ctx.xmm3.f32[0] = -100000.00f;
-                    }
-                    else if (fAspectRatio > fNativeAspect) {
+                    if (fAspectRatio > fNativeAspect) {
                         ctx.xmm2.f32[0] += ((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                     }
                     else if (fAspectRatio < fNativeAspect) {
