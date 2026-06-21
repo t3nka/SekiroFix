@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test8";
+std::string sFixVersion = "0.0.4-test9";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -142,7 +142,7 @@ std::string HexValue(uintptr_t value)
     return stream.str();
 }
 
-void PatchScaleformMarkerStrings(std::uint8_t* blockStart)
+void PatchScaleformMarkerStrings(std::uint8_t* chunkStart, std::uint8_t* bufferStart, std::uint8_t* bufferEnd, bool* found)
 {
     const std::vector<std::pair<std::string, std::string>> replacements = {
         { "MENU_Find_01", "HIDE_Find_01" },
@@ -150,37 +150,22 @@ void PatchScaleformMarkerStrings(std::uint8_t* blockStart)
         { "MENU_Radar", "HIDE_Radar" }
     };
 
-    constexpr size_t iPatchWindow = 0x300;
-    std::vector<std::uint8_t> buffer(iPatchWindow);
-    SIZE_T bytesRead = 0;
+    for (size_t i = 0; i < replacements.size(); i++) {
+        const auto& [original, replacement] = replacements[i];
+        auto searchStart = bufferStart;
 
-    if (!ReadProcessMemory(GetCurrentProcess(), blockStart, buffer.data(), buffer.size(), &bytesRead) || bytesRead == 0) {
-        spdlog::warn("HUD: Scaleform GFX: Test8 failed to read marker resource string block at {:s}.", HexValue(reinterpret_cast<uintptr_t>(blockStart)));
-        return;
-    }
-
-    spdlog::info("HUD: Scaleform GFX: Test8 patching marker resource string block at {:s}.", HexValue(reinterpret_cast<uintptr_t>(blockStart)));
-
-    for (const auto& [original, replacement] : replacements) {
-        auto searchStart = buffer.data();
-        auto searchEnd = buffer.data() + bytesRead;
-        bool bFound = false;
-
-        while (searchStart + original.size() <= searchEnd) {
-            auto match = std::search(searchStart, searchEnd, original.begin(), original.end());
-            if (match == searchEnd)
+        while (searchStart + original.size() <= bufferEnd) {
+            auto match = std::search(searchStart, bufferEnd, original.begin(), original.end());
+            if (match == bufferEnd)
                 break;
 
-            auto matchAddress = blockStart + (match - buffer.data());
+            auto matchAddress = chunkStart + (match - bufferStart);
             Memory::PatchBytes(matchAddress, replacement.c_str(), static_cast<unsigned int>(replacement.size()));
-            spdlog::info("HUD: Scaleform GFX: Test8 patched '{:s}' -> '{:s}' at {:s}.",
+            spdlog::info("HUD: Scaleform GFX: Test9 patched '{:s}' -> '{:s}' at {:s}.",
                 original, replacement, HexValue(reinterpret_cast<uintptr_t>(matchAddress)));
-            bFound = true;
+            found[i] = true;
             searchStart = match + original.size();
         }
-
-        if (!bFound)
-            spdlog::warn("HUD: Scaleform GFX: Test8 did not find '{:s}' near marker string block.", original);
     }
 }
 
@@ -190,11 +175,11 @@ void PatchScaleformMarkerStringBlock()
     if (bPatched)
         return;
 
-    constexpr std::string_view target = "MENU_Find_01";
     constexpr size_t iChunkSize = 1024 * 1024;
     std::vector<std::uint8_t> buffer(iChunkSize);
+    bool found[] = { false, false, false };
 
-    spdlog::info("HUD: Scaleform GFX: Test8 marker resource string patch scan starting.");
+    spdlog::info("HUD: Scaleform GFX: Test9 marker resource string patch scan starting.");
     std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
     MEMORY_BASIC_INFORMATION mbi{};
 
@@ -208,29 +193,7 @@ void PatchScaleformMarkerStringBlock()
                 SIZE_T bytesRead = 0;
 
                 if (ReadProcessMemory(GetCurrentProcess(), chunkStart, buffer.data(), bytesToRead, &bytesRead)) {
-                    auto searchStart = buffer.data();
-                    auto searchEnd = buffer.data() + bytesRead;
-
-                    while (searchStart + target.size() <= searchEnd) {
-                        auto match = std::search(searchStart, searchEnd, target.begin(), target.end());
-                        if (match == searchEnd)
-                            break;
-
-                        auto matchAddress = chunkStart + (match - buffer.data());
-                        spdlog::info("HUD: Scaleform GFX: Test8 found marker block anchor at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
-                            HexValue(reinterpret_cast<uintptr_t>(matchAddress)),
-                            HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
-                            HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
-                            mbi.Protect,
-                            mbi.Type,
-                            IsWritableProtect(mbi.Protect),
-                            ReadAsciiPreview(matchAddress, 80));
-
-                        PatchScaleformMarkerStrings(matchAddress);
-                        bPatched = true;
-                        spdlog::info("HUD: Scaleform GFX: Test8 marker resource string patch scan finished.");
-                        return;
-                    }
+                    PatchScaleformMarkerStrings(chunkStart, buffer.data(), buffer.data() + bytesRead, found);
                 }
 
                 auto nextChunk = chunkStart + bytesToRead;
@@ -245,15 +208,22 @@ void PatchScaleformMarkerStringBlock()
         address = regionEnd;
     }
 
-    spdlog::warn("HUD: Scaleform GFX: Test8 marker resource string block anchor not found.");
+    const char* names[] = { "MENU_Find_01", "MENU_Find_02", "MENU_Radar" };
+    for (size_t i = 0; i < sizeof(found) / sizeof(found[0]); i++) {
+        if (!found[i])
+            spdlog::warn("HUD: Scaleform GFX: Test9 did not find '{:s}'.", names[i]);
+    }
+
+    bPatched = true;
+    spdlog::info("HUD: Scaleform GFX: Test9 marker resource string patch scan finished.");
 }
 
 DWORD WINAPI DelayedPatchScaleformMarkerStringBlock(LPVOID)
 {
     Sleep(3000);
-    spdlog::info("HUD: Scaleform GFX: Test8 delayed marker resource patch starting.");
+    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch starting.");
     PatchScaleformMarkerStringBlock();
-    spdlog::info("HUD: Scaleform GFX: Test8 delayed marker resource patch finished.");
+    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch finished.");
     return 0;
 }
 
@@ -496,12 +466,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionHorMidHook{};
             AwarenessMarkersTransitionHorMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm1.f32[0] = -99999.00f;
-                    }
-                    else if (fAspectRatio > fNativeAspect) {
+                    if (fAspectRatio > fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                         ctx.xmm1.f32[0] = 1080.00f * fAspectRatio;
                     }
@@ -510,12 +475,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionVertMidHook{};
             AwarenessMarkersTransitionVertMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult + 0x2A,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm4.f32[0] = -99999.00f;
-                    }
-                    else if (fAspectRatio < fNativeAspect) {
+                    if (fAspectRatio < fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
                         ctx.xmm4.f32[0] = 1920.00f / fAspectRatio;
                     }
@@ -525,12 +485,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersCullingMidHook{};
             AwarenessMarkersCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Shrink marker culling bounds so awareness markers fail their visibility tests.
-                        ctx.xmm2.f32[0] = -100000.00f;
-                        ctx.xmm3.f32[0] = -100000.00f;
-                    }
-                    else if (fAspectRatio > fNativeAspect) {
+                    if (fAspectRatio > fNativeAspect) {
                         ctx.xmm2.f32[0] += ((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                     }
                     else if (fAspectRatio < fNativeAspect) {
@@ -590,10 +545,10 @@ void HUD()
                                 HANDLE hThread = CreateThread(nullptr, 0, DelayedPatchScaleformMarkerStringBlock, nullptr, 0, nullptr);
                                 if (hThread) {
                                     CloseHandle(hThread);
-                                    spdlog::info("HUD: Scaleform GFX: Test8 delayed marker resource patch scheduled.");
+                                    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch scheduled.");
                                 }
                                 else {
-                                    spdlog::warn("HUD: Scaleform GFX: Test8 failed to schedule delayed marker resource patch.");
+                                    spdlog::warn("HUD: Scaleform GFX: Test9 failed to schedule delayed marker resource patch.");
                                 }
                             }
                         }
