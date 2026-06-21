@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4";
+std::string sFixVersion = "0.0.4-test1";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -338,12 +338,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionHorMidHook{};
             AwarenessMarkersTransitionHorMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm1.f32[0] = -99999.00f;
-                    }
-                    else if (fAspectRatio > fNativeAspect) {
+                    if (!bHideAwarenessMarkers && fAspectRatio > fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                         ctx.xmm1.f32[0] = 1080.00f * fAspectRatio;
                     }
@@ -352,12 +347,7 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionVertMidHook{};
             AwarenessMarkersTransitionVertMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult + 0x2A,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Collapse marker transition bounds far offscreen.
-                        ctx.xmm0.f32[0] = -100000.00f;
-                        ctx.xmm4.f32[0] = -99999.00f;
-                    }
-                    else if (fAspectRatio < fNativeAspect) {
+                    if (!bHideAwarenessMarkers && fAspectRatio < fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
                         ctx.xmm4.f32[0] = 1920.00f / fAspectRatio;
                     }
@@ -367,16 +357,20 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersCullingMidHook{};
             AwarenessMarkersCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (bHideAwarenessMarkers) {
-                        // Shrink marker culling bounds so awareness markers fail their visibility tests.
-                        ctx.xmm2.f32[0] = -100000.00f;
-                        ctx.xmm3.f32[0] = -100000.00f;
-                    }
-                    else if (fAspectRatio > fNativeAspect) {
+                    if (!bHideAwarenessMarkers && fAspectRatio > fNativeAspect) {
                         ctx.xmm2.f32[0] += ((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                     }
-                    else if (fAspectRatio < fNativeAspect) {
+                    else if (!bHideAwarenessMarkers && fAspectRatio < fNativeAspect) {
                         ctx.xmm3.f32[0] += ((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
+                    }
+                });
+
+            static SafetyHookMid AwarenessMarkersHideMidHook{};
+            AwarenessMarkersHideMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult + 0x7,
+                [](SafetyHookContext& ctx) {
+                    if (bHideAwarenessMarkers) {
+                        // Test 1: force the conditional branch after the culling comparison to take the carry path.
+                        ctx.rflags |= 1ULL;
                     }
                 });
         }
