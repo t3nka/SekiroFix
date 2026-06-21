@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test4";
+std::string sFixVersion = "0.0.4-test5";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -117,6 +117,113 @@ std::string ReadAsciiPreview(std::uint8_t* address, size_t maxLength = 96)
     }
 
     return preview.empty() ? "<no ascii>" : preview;
+}
+
+bool IsWritableProtect(DWORD protect)
+{
+    protect &= 0xFF;
+    return protect == PAGE_READWRITE || protect == PAGE_WRITECOPY || protect == PAGE_EXECUTE_READWRITE || protect == PAGE_EXECUTE_WRITECOPY;
+}
+
+bool IsScannableProtect(DWORD protect)
+{
+    if (protect & PAGE_GUARD)
+        return false;
+
+    protect &= 0xFF;
+    return protect == PAGE_READONLY || protect == PAGE_READWRITE || protect == PAGE_WRITECOPY ||
+        protect == PAGE_EXECUTE_READ || protect == PAGE_EXECUTE_READWRITE || protect == PAGE_EXECUTE_WRITECOPY;
+}
+
+std::string HexValue(uintptr_t value)
+{
+    std::ostringstream stream;
+    stream << "0x" << std::uppercase << std::hex << value;
+    return stream.str();
+}
+
+void LogScaleformStringMatches()
+{
+    static bool bScanned = false;
+    if (bScanned)
+        return;
+    bScanned = true;
+
+    const std::vector<std::string> targets = {
+        "MENU_Find_01",
+        "MENU_Find_02",
+        "MENU_Radar",
+        "FindIcon0",
+        "FindIcon1",
+        "FindIcon2",
+        "FindIcon3",
+        "FindIcon4",
+        "FindIcon5",
+        "FindIcon6",
+        "FindIcon7",
+        "Icon_eye",
+        "Icon_eye_2",
+        "CautionText",
+        "_visible",
+        "_alpha"
+    };
+
+    spdlog::info("HUD: Scaleform GFX: Test5 marker string scan starting.");
+
+    for (const auto& target : targets) {
+        size_t matches = 0;
+        std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
+        MEMORY_BASIC_INFORMATION mbi{};
+
+        while (VirtualQuery(address, &mbi, sizeof(mbi))) {
+            auto regionStart = reinterpret_cast<std::uint8_t*>(mbi.BaseAddress);
+            auto regionEnd = regionStart + mbi.RegionSize;
+
+            if (mbi.State == MEM_COMMIT && IsScannableProtect(mbi.Protect)) {
+                std::uint8_t* searchStart = regionStart;
+
+                __try
+                {
+                    while (searchStart + target.size() <= regionEnd) {
+                        auto match = std::search(searchStart, regionEnd, target.begin(), target.end());
+                        if (match == regionEnd)
+                            break;
+
+                        matches++;
+                        spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
+                            target,
+                            HexValue(reinterpret_cast<uintptr_t>(match)),
+                            HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
+                            HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
+                            mbi.Protect,
+                            mbi.Type,
+                            IsWritableProtect(mbi.Protect),
+                            ReadAsciiPreview(match, 80));
+
+                        searchStart = match + target.size();
+                        if (matches >= 20)
+                            break;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    spdlog::warn("HUD: Scaleform GFX: Test5 skipped unreadable region {:s} while scanning '{:s}'",
+                        HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)), target);
+                }
+            }
+
+            if (regionEnd <= address)
+                break;
+            address = regionEnd;
+
+            if (matches >= 20)
+                break;
+        }
+
+        spdlog::info("HUD: Scaleform GFX: Test5 scan complete for '{:s}', matches={}", target, matches);
+    }
+
+    spdlog::info("HUD: Scaleform GFX: Test5 marker string scan finished.");
 }
 
 void CalculateAspectRatio(bool bLog)
@@ -446,20 +553,7 @@ void HUD()
                         spdlog::info("HUD: Scaleform GFX: Loaded {:s}", sGFXName);
 
                         if (bHideAwarenessMarkers && sGFXName.contains("01_000_fe.gfx")) {
-                            spdlog::info("HUD: Scaleform GFX: Test4 01_000_fe.gfx diagnostics.");
-                            spdlog::info("HUD: Scaleform GFX: Test4 regs rax=0x{:016X} rbx=0x{:016X} rcx=0x{:016X} rdx=0x{:016X} rsi=0x{:016X} rdi=0x{:016X} r8=0x{:016X} r9=0x{:016X}",
-                                ctx.rax, ctx.rbx, ctx.rcx, ctx.rdx, ctx.rsi, ctx.rdi, ctx.r8, ctx.r9);
-                            spdlog::info("HUD: Scaleform GFX: Test4 xmm5={:.3f},{:.3f},{:.3f},{:.3f} xmm7={:.3f},{:.3f},{:.3f},{:.3f}",
-                                ctx.xmm5.f32[0], ctx.xmm5.f32[1], ctx.xmm5.f32[2], ctx.xmm5.f32[3],
-                                ctx.xmm7.f32[0], ctx.xmm7.f32[1], ctx.xmm7.f32[2], ctx.xmm7.f32[3]);
-
-                            for (uintptr_t offset : { 0x0, 0x8, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68, 0x70, 0x78, 0x80 }) {
-                                uintptr_t value = 0;
-                                if (ReadMemory(reinterpret_cast<std::uint8_t*>(ctx.rax + offset), value)) {
-                                    spdlog::info("HUD: Scaleform GFX: Test4 rax+0x{:02X}=0x{:016X} ascii='{:s}'",
-                                        offset, value, ReadAsciiPreview(reinterpret_cast<std::uint8_t*>(value), 80));
-                                }
-                            }
+                            LogScaleformStringMatches();
                         }
 
                         if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {

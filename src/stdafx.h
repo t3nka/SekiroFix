@@ -9,5 +9,7 @@
 #include <cstdint>
 #include <fstream>
 #include <filesystem>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <vector>
