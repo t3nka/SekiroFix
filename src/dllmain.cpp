@@ -12,6 +12,7 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <inipp/inipp.h>
 #include <safetyhook.hpp>
+#include <atomic>
 #include <cwctype>
 #include <mutex>
 #include <unordered_set>
@@ -23,7 +24,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-resource-log-test1";
+std::string sFixVersion = "0.0.4-resource-log-test2";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -88,6 +89,7 @@ struct SekiroString
 using SekiroArchivePathFn = void* (*)(SekiroString*, std::uint64_t, std::uint64_t, DLString*, std::uint64_t, std::uint64_t);
 
 SafetyHookInline ResourcePathHook{};
+std::atomic_uint64_t ResourcePathCallCount = 0;
 std::mutex ResourcePathLogMutex;
 std::unordered_set<std::wstring> LoggedResourcePaths;
 
@@ -188,7 +190,8 @@ std::string WideToUtf8(std::wstring_view value)
 
 std::wstring ReadDLString(const DLString* value)
 {
-    if (!value || !value->string || value->length == 0 || value->length > 1024 || value->capacity < value->length)
+    if (!value || !IsReadableAddress(reinterpret_cast<std::uint8_t*>(const_cast<DLString*>(value)), sizeof(DLString)) ||
+        !value->string || value->length == 0 || value->length > 1024 || value->capacity < value->length)
         return {};
 
     if (!IsReadableAddress(reinterpret_cast<std::uint8_t*>(value->string), static_cast<size_t>(value->length) * sizeof(wchar_t)))
@@ -199,6 +202,27 @@ std::wstring ReadDLString(const DLString* value)
         length--;
 
     return std::wstring(value->string, length);
+}
+
+std::string DescribeDLString(const DLString* value)
+{
+    std::ostringstream stream;
+    stream << "struct=" << HexValue(reinterpret_cast<uintptr_t>(value));
+
+    if (!value || !IsReadableAddress(reinterpret_cast<std::uint8_t*>(const_cast<DLString*>(value)), sizeof(DLString))) {
+        stream << " <unreadable>";
+        return stream.str();
+    }
+
+    stream << " string=" << HexValue(reinterpret_cast<uintptr_t>(value->string));
+    stream << " length=" << value->length;
+    stream << " capacity=" << value->capacity;
+
+    const std::wstring text = ReadDLString(value);
+    if (!text.empty())
+        stream << " text=\"" << WideToUtf8(text) << "\"";
+
+    return stream.str();
 }
 
 bool IsInterestingResourcePath(std::wstring path)
@@ -231,9 +255,27 @@ void LogResourcePath(std::string_view label, const DLString* path)
 
 void* SekiroArchivePathDetour(SekiroString* path, std::uint64_t p2, std::uint64_t p3, DLString* p4, std::uint64_t p5, std::uint64_t p6)
 {
+    const auto callCount = ++ResourcePathCallCount;
+    if (callCount <= 64 || callCount % 1000 == 0) {
+        spdlog::info("Resource Path Log: call #{:d}: path {:s}; p4 {:s}; p2={:s}; p3={:s}; p5={:s}; p6={:s}",
+            callCount,
+            DescribeDLString(path ? &path->string : nullptr),
+            DescribeDLString(p4),
+            HexValue(static_cast<uintptr_t>(p2)),
+            HexValue(static_cast<uintptr_t>(p3)),
+            HexValue(static_cast<uintptr_t>(p5)),
+            HexValue(static_cast<uintptr_t>(p6)));
+    }
+
     LogResourcePath("input", path ? &path->string : nullptr);
 
     void* result = ResourcePathHook.call<void*>(path, p2, p3, p4, p5, p6);
+
+    if (callCount <= 64 || callCount % 1000 == 0) {
+        spdlog::info("Resource Path Log: call #{:d}: result {:s}",
+            callCount,
+            DescribeDLString(result ? &reinterpret_cast<SekiroString*>(result)->string : nullptr));
+    }
 
     if (result)
         LogResourcePath("output", &reinterpret_cast<SekiroString*>(result)->string);
