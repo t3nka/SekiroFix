@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test5b";
+std::string sFixVersion = "0.0.4-test6";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -142,39 +142,70 @@ std::string HexValue(uintptr_t value)
     return stream.str();
 }
 
-void LogScaleformStringMatches()
+void PatchScaleformMarkerStrings(std::uint8_t* blockStart)
 {
-    static bool bScanned = false;
-    if (bScanned)
-        return;
-    bScanned = true;
-
-    const std::vector<std::string> targets = {
-        "MENU_Find_01",
-        "MENU_Find_02",
-        "MENU_Radar",
-        "FindIcon0",
-        "FindIcon1",
-        "FindIcon2",
-        "FindIcon3",
-        "FindIcon4",
-        "FindIcon5",
-        "FindIcon6",
-        "FindIcon7",
-        "Icon_eye",
-        "Icon_eye_2",
-        "CautionText",
-        "_visible",
-        "_alpha"
+    const std::vector<std::pair<std::string, std::string>> replacements = {
+        { "MENU_Find_01", "HIDE_Find_01" },
+        { "MENU_Find_02", "HIDE_Find_02" },
+        { "MENU_Radar", "HIDE_Radar" },
+        { "FindIcon0", "HideIcon0" },
+        { "FindIcon1", "HideIcon1" },
+        { "FindIcon2", "HideIcon2" },
+        { "FindIcon3", "HideIcon3" },
+        { "FindIcon4", "HideIcon4" },
+        { "FindIcon5", "HideIcon5" },
+        { "FindIcon6", "HideIcon6" },
+        { "FindIcon7", "HideIcon7" },
+        { "Icon_eye_2", "Hide_eye_2" },
+        { "Icon_eye", "Hide_eye" },
+        { "CautionText", "HiddenText1" }
     };
 
-    spdlog::info("HUD: Scaleform GFX: Test5 marker string scan starting.");
+    constexpr size_t iPatchWindow = 0x300;
+    std::vector<std::uint8_t> buffer(iPatchWindow);
+    SIZE_T bytesRead = 0;
 
+    if (!ReadProcessMemory(GetCurrentProcess(), blockStart, buffer.data(), buffer.size(), &bytesRead) || bytesRead == 0) {
+        spdlog::warn("HUD: Scaleform GFX: Test6 failed to read marker string block at {:s}.", HexValue(reinterpret_cast<uintptr_t>(blockStart)));
+        return;
+    }
+
+    spdlog::info("HUD: Scaleform GFX: Test6 patching marker string block at {:s}.", HexValue(reinterpret_cast<uintptr_t>(blockStart)));
+
+    for (const auto& [original, replacement] : replacements) {
+        auto searchStart = buffer.data();
+        auto searchEnd = buffer.data() + bytesRead;
+        bool bFound = false;
+
+        while (searchStart + original.size() <= searchEnd) {
+            auto match = std::search(searchStart, searchEnd, original.begin(), original.end());
+            if (match == searchEnd)
+                break;
+
+            auto matchAddress = blockStart + (match - buffer.data());
+            Memory::PatchBytes(matchAddress, replacement.c_str(), static_cast<unsigned int>(replacement.size()));
+            spdlog::info("HUD: Scaleform GFX: Test6 patched '{:s}' -> '{:s}' at {:s}.",
+                original, replacement, HexValue(reinterpret_cast<uintptr_t>(matchAddress)));
+            bFound = true;
+            searchStart = match + original.size();
+        }
+
+        if (!bFound)
+            spdlog::warn("HUD: Scaleform GFX: Test6 did not find '{:s}' near marker string block.", original);
+    }
+}
+
+void PatchScaleformMarkerStringBlock()
+{
+    static bool bPatched = false;
+    if (bPatched)
+        return;
+
+    constexpr std::string_view target = "MENU_Find_01";
     constexpr size_t iChunkSize = 1024 * 1024;
-    constexpr size_t iMaxMatchesPerTarget = 5;
     std::vector<std::uint8_t> buffer(iChunkSize);
-    std::vector<size_t> matchCounts(targets.size(), 0);
 
+    spdlog::info("HUD: Scaleform GFX: Test6 marker string patch scan starting.");
     std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
     MEMORY_BASIC_INFORMATION mbi{};
 
@@ -188,35 +219,28 @@ void LogScaleformStringMatches()
                 SIZE_T bytesRead = 0;
 
                 if (ReadProcessMemory(GetCurrentProcess(), chunkStart, buffer.data(), bytesToRead, &bytesRead)) {
-                    for (size_t i = 0; i < targets.size(); i++) {
-                        const auto& target = targets[i];
-                        if (matchCounts[i] >= iMaxMatchesPerTarget || bytesRead < target.size())
-                            continue;
+                    auto searchStart = buffer.data();
+                    auto searchEnd = buffer.data() + bytesRead;
 
-                        auto searchStart = buffer.data();
-                        auto searchEnd = buffer.data() + bytesRead;
+                    while (searchStart + target.size() <= searchEnd) {
+                        auto match = std::search(searchStart, searchEnd, target.begin(), target.end());
+                        if (match == searchEnd)
+                            break;
 
-                        while (searchStart + target.size() <= searchEnd) {
-                            auto match = std::search(searchStart, searchEnd, target.begin(), target.end());
-                            if (match == searchEnd)
-                                break;
+                        auto matchAddress = chunkStart + (match - buffer.data());
+                        spdlog::info("HUD: Scaleform GFX: Test6 found marker block anchor at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
+                            HexValue(reinterpret_cast<uintptr_t>(matchAddress)),
+                            HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
+                            HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
+                            mbi.Protect,
+                            mbi.Type,
+                            IsWritableProtect(mbi.Protect),
+                            ReadAsciiPreview(matchAddress, 80));
 
-                            auto matchAddress = chunkStart + (match - buffer.data());
-                            matchCounts[i]++;
-                            spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
-                                target,
-                                HexValue(reinterpret_cast<uintptr_t>(matchAddress)),
-                                HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
-                                HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
-                                mbi.Protect,
-                                mbi.Type,
-                                IsWritableProtect(mbi.Protect),
-                                ReadAsciiPreview(matchAddress, 80));
-
-                            searchStart = match + target.size();
-                            if (matchCounts[i] >= iMaxMatchesPerTarget)
-                                break;
-                        }
+                        PatchScaleformMarkerStrings(matchAddress);
+                        bPatched = true;
+                        spdlog::info("HUD: Scaleform GFX: Test6 marker string patch scan finished.");
+                        return;
                     }
                 }
 
@@ -232,11 +256,7 @@ void LogScaleformStringMatches()
         address = regionEnd;
     }
 
-    for (size_t i = 0; i < targets.size(); i++) {
-        spdlog::info("HUD: Scaleform GFX: Test5 scan complete for '{:s}', matches={}", targets[i], matchCounts[i]);
-    }
-
-    spdlog::info("HUD: Scaleform GFX: Test5 marker string scan finished.");
+    spdlog::warn("HUD: Scaleform GFX: Test6 marker string block anchor not found.");
 }
 
 void CalculateAspectRatio(bool bLog)
@@ -566,7 +586,7 @@ void HUD()
                         spdlog::info("HUD: Scaleform GFX: Loaded {:s}", sGFXName);
 
                         if (bHideAwarenessMarkers && sGFXName.contains("01_000_fe.gfx")) {
-                            LogScaleformStringMatches();
+                            PatchScaleformMarkerStringBlock();
                         }
 
                         if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {
