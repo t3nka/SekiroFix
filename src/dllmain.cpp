@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test9";
+std::string sFixVersion = "0.0.4-test10";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -142,44 +142,77 @@ std::string HexValue(uintptr_t value)
     return stream.str();
 }
 
-void PatchScaleformMarkerStrings(std::uint8_t* chunkStart, std::uint8_t* bufferStart, std::uint8_t* bufferEnd, bool* found)
+void PatchLayoutDimension(std::uint8_t* address, size_t digitCount)
 {
-    const std::vector<std::pair<std::string, std::string>> replacements = {
-        { "MENU_Find_01", "HIDE_Find_01" },
-        { "MENU_Find_02", "HIDE_Find_02" },
-        { "MENU_Radar", "HIDE_Radar" }
-    };
-
-    for (size_t i = 0; i < replacements.size(); i++) {
-        const auto& [original, replacement] = replacements[i];
-        auto searchStart = bufferStart;
-
-        while (searchStart + original.size() <= bufferEnd) {
-            auto match = std::search(searchStart, bufferEnd, original.begin(), original.end());
-            if (match == bufferEnd)
-                break;
-
-            auto matchAddress = chunkStart + (match - bufferStart);
-            Memory::PatchBytes(matchAddress, replacement.c_str(), static_cast<unsigned int>(replacement.size()));
-            spdlog::info("HUD: Scaleform GFX: Test9 patched '{:s}' -> '{:s}' at {:s}.",
-                original, replacement, HexValue(reinterpret_cast<uintptr_t>(matchAddress)));
-            found[i] = true;
-            searchStart = match + original.size();
-        }
-    }
+    std::string zeroes(digitCount, '0');
+    Memory::PatchBytes(address, zeroes.c_str(), static_cast<unsigned int>(zeroes.size()));
 }
 
-void PatchScaleformMarkerStringBlock()
+bool PatchLayoutMarkerEntry(std::uint8_t* chunkStart, std::uint8_t* bufferStart, std::uint8_t* bufferEnd, std::string_view markerName)
+{
+    bool bPatched = false;
+    auto searchStart = bufferStart;
+
+    while (searchStart + markerName.size() <= bufferEnd) {
+        auto match = std::search(searchStart, bufferEnd, markerName.begin(), markerName.end());
+        if (match == bufferEnd)
+            break;
+
+        auto lineEnd = match;
+        while (lineEnd < bufferEnd && lineEnd - match < 256 && *lineEnd != '\n')
+            lineEnd++;
+
+        constexpr std::string_view widthPrefix = "width=\"";
+        constexpr std::string_view heightPrefix = "height=\"";
+
+        auto widthMatch = std::search(match, lineEnd, widthPrefix.begin(), widthPrefix.end());
+        auto heightMatch = std::search(match, lineEnd, heightPrefix.begin(), heightPrefix.end());
+
+        if (widthMatch != lineEnd) {
+            auto digitStart = widthMatch + widthPrefix.size();
+            auto digitEnd = digitStart;
+            while (digitEnd < lineEnd && *digitEnd >= '0' && *digitEnd <= '9')
+                digitEnd++;
+
+            if (digitEnd > digitStart) {
+                PatchLayoutDimension(chunkStart + (digitStart - bufferStart), digitEnd - digitStart);
+                bPatched = true;
+            }
+        }
+
+        if (heightMatch != lineEnd) {
+            auto digitStart = heightMatch + heightPrefix.size();
+            auto digitEnd = digitStart;
+            while (digitEnd < lineEnd && *digitEnd >= '0' && *digitEnd <= '9')
+                digitEnd++;
+
+            if (digitEnd > digitStart) {
+                PatchLayoutDimension(chunkStart + (digitStart - bufferStart), digitEnd - digitStart);
+                bPatched = true;
+            }
+        }
+
+        if (bPatched)
+            spdlog::info("HUD: Layout: Test10 zeroed marker atlas entry '{:s}' at {:s}.", std::string(markerName), HexValue(reinterpret_cast<uintptr_t>(chunkStart + (match - bufferStart))));
+
+        searchStart = match + markerName.size();
+    }
+
+    return bPatched;
+}
+
+void PatchLayoutMarkerEntries()
 {
     static bool bPatched = false;
     if (bPatched)
         return;
 
-    constexpr size_t iChunkSize = 1024 * 1024;
+    constexpr size_t iChunkSize = 4 * 1024 * 1024;
     std::vector<std::uint8_t> buffer(iChunkSize);
     bool found[] = { false, false, false };
+    const std::string_view names[] = { "MENU_Find_01.png", "MENU_Find_02.png", "MENU_Radar.png" };
 
-    spdlog::info("HUD: Scaleform GFX: Test9 marker resource string patch scan starting.");
+    spdlog::info("HUD: Layout: Test10 marker atlas scan starting.");
     std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
     MEMORY_BASIC_INFORMATION mbi{};
 
@@ -193,7 +226,13 @@ void PatchScaleformMarkerStringBlock()
                 SIZE_T bytesRead = 0;
 
                 if (ReadProcessMemory(GetCurrentProcess(), chunkStart, buffer.data(), bytesToRead, &bytesRead)) {
-                    PatchScaleformMarkerStrings(chunkStart, buffer.data(), buffer.data() + bytesRead, found);
+                    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+                        if (!found[i] && PatchLayoutMarkerEntry(chunkStart, buffer.data(), buffer.data() + bytesRead, names[i]))
+                            found[i] = true;
+                    }
+
+                    if (found[0] && found[1] && found[2])
+                        break;
                 }
 
                 auto nextChunk = chunkStart + bytesToRead;
@@ -205,25 +244,26 @@ void PatchScaleformMarkerStringBlock()
 
         if (regionEnd <= address)
             break;
+        if (found[0] && found[1] && found[2])
+            break;
         address = regionEnd;
     }
 
-    const char* names[] = { "MENU_Find_01", "MENU_Find_02", "MENU_Radar" };
     for (size_t i = 0; i < sizeof(found) / sizeof(found[0]); i++) {
         if (!found[i])
-            spdlog::warn("HUD: Scaleform GFX: Test9 did not find '{:s}'.", names[i]);
+            spdlog::warn("HUD: Layout: Test10 did not find '{:s}'.", std::string(names[i]));
     }
 
     bPatched = true;
-    spdlog::info("HUD: Scaleform GFX: Test9 marker resource string patch scan finished.");
+    spdlog::info("HUD: Layout: Test10 marker atlas scan finished.");
 }
 
 DWORD WINAPI DelayedPatchScaleformMarkerStringBlock(LPVOID)
 {
-    Sleep(3000);
-    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch starting.");
-    PatchScaleformMarkerStringBlock();
-    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch finished.");
+    Sleep(500);
+    spdlog::info("HUD: Layout: Test10 delayed marker atlas patch starting.");
+    PatchLayoutMarkerEntries();
+    spdlog::info("HUD: Layout: Test10 delayed marker atlas patch finished.");
     return 0;
 }
 
@@ -545,10 +585,10 @@ void HUD()
                                 HANDLE hThread = CreateThread(nullptr, 0, DelayedPatchScaleformMarkerStringBlock, nullptr, 0, nullptr);
                                 if (hThread) {
                                     CloseHandle(hThread);
-                                    spdlog::info("HUD: Scaleform GFX: Test9 delayed marker resource patch scheduled.");
+                                    spdlog::info("HUD: Layout: Test10 delayed marker atlas patch scheduled.");
                                 }
                                 else {
-                                    spdlog::warn("HUD: Scaleform GFX: Test9 failed to schedule delayed marker resource patch.");
+                                    spdlog::warn("HUD: Layout: Test10 failed to schedule delayed marker atlas patch.");
                                 }
                             }
                         }
