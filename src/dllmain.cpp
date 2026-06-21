@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test3";
+std::string sFixVersion = "0.0.4-test4";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -97,6 +97,26 @@ bool ReadMemory(std::uint8_t* address, T& value)
     {
         return false;
     }
+}
+
+std::string ReadAsciiPreview(std::uint8_t* address, size_t maxLength = 96)
+{
+    if (!IsReadableAddress(address, 1))
+        return "<unreadable>";
+
+    std::string preview;
+    for (size_t i = 0; i < maxLength; i++) {
+        if (!IsReadableAddress(address + i, 1))
+            break;
+
+        char c = *reinterpret_cast<char*>(address + i);
+        if (c == '\0')
+            break;
+
+        preview += (c >= 32 && c <= 126) ? c : '.';
+    }
+
+    return preview.empty() ? "<no ascii>" : preview;
 }
 
 void CalculateAspectRatio(bool bLog)
@@ -426,10 +446,20 @@ void HUD()
                         spdlog::info("HUD: Scaleform GFX: Loaded {:s}", sGFXName);
 
                         if (bHideAwarenessMarkers && sGFXName.contains("01_000_fe.gfx")) {
-                            spdlog::info("HUD: Scaleform GFX: Test3 hiding 01_000_fe.gfx sizing values.");
-                            ctx.xmm5.f32[0] = 0.00f;
-                            ctx.xmm7.f32[0] = 0.00f;
-                            return;
+                            spdlog::info("HUD: Scaleform GFX: Test4 01_000_fe.gfx diagnostics.");
+                            spdlog::info("HUD: Scaleform GFX: Test4 regs rax=0x{:016X} rbx=0x{:016X} rcx=0x{:016X} rdx=0x{:016X} rsi=0x{:016X} rdi=0x{:016X} r8=0x{:016X} r9=0x{:016X}",
+                                ctx.rax, ctx.rbx, ctx.rcx, ctx.rdx, ctx.rsi, ctx.rdi, ctx.r8, ctx.r9);
+                            spdlog::info("HUD: Scaleform GFX: Test4 xmm5={:.3f},{:.3f},{:.3f},{:.3f} xmm7={:.3f},{:.3f},{:.3f},{:.3f}",
+                                ctx.xmm5.f32[0], ctx.xmm5.f32[1], ctx.xmm5.f32[2], ctx.xmm5.f32[3],
+                                ctx.xmm7.f32[0], ctx.xmm7.f32[1], ctx.xmm7.f32[2], ctx.xmm7.f32[3]);
+
+                            for (uintptr_t offset : { 0x0, 0x8, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60, 0x68, 0x70, 0x78, 0x80 }) {
+                                uintptr_t value = 0;
+                                if (ReadMemory(reinterpret_cast<std::uint8_t*>(ctx.rax + offset), value)) {
+                                    spdlog::info("HUD: Scaleform GFX: Test4 rax+0x{:02X}=0x{:016X} ascii='{:s}'",
+                                        offset, value, ReadAsciiPreview(reinterpret_cast<std::uint8_t*>(value), 80));
+                                }
+                            }
                         }
 
                         if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {
