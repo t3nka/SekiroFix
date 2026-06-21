@@ -24,7 +24,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-resource-log-test2";
+std::string sFixVersion = "0.0.4-resource-log-test3";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -89,7 +89,9 @@ struct SekiroString
 using SekiroArchivePathFn = void* (*)(SekiroString*, std::uint64_t, std::uint64_t, DLString*, std::uint64_t, std::uint64_t);
 
 SafetyHookInline ResourcePathHook{};
+std::vector<SafetyHookMid> ResourcePathCandidateHooks{};
 std::atomic_uint64_t ResourcePathCallCount = 0;
+std::atomic_uint64_t ResourcePathCandidateCallCount = 0;
 std::mutex ResourcePathLogMutex;
 std::unordered_set<std::wstring> LoggedResourcePaths;
 
@@ -281,6 +283,34 @@ void* SekiroArchivePathDetour(SekiroString* path, std::uint64_t p2, std::uint64_
         LogResourcePath("output", &reinterpret_cast<SekiroString*>(result)->string);
 
     return result;
+}
+
+void LogResourcePathCandidateCall(size_t candidateIndex, std::uint8_t* candidateAddress, SafetyHookContext& ctx)
+{
+    const auto callCount = ++ResourcePathCandidateCallCount;
+    const auto* path = reinterpret_cast<SekiroString*>(ctx.rcx);
+    const auto* p4 = reinterpret_cast<DLString*>(ctx.r9);
+
+    const std::wstring text = ReadDLString(path ? &path->string : nullptr);
+    const bool interesting = !text.empty() && IsInterestingResourcePath(text);
+
+    if (interesting) {
+        std::ostringstream label;
+        label << "candidate #" << candidateIndex << " input";
+        LogResourcePath(label.str(), path ? &path->string : nullptr);
+    }
+
+    if (interesting || callCount <= 128 || callCount % 1000 == 0) {
+        spdlog::info("Resource Path Candidate: call #{:d}: candidate #{} at {:s}+{:x}: path {:s}; p4 {:s}; rdx={:s}; r8={:s}",
+            callCount,
+            candidateIndex,
+            sExeName.c_str(),
+            candidateAddress - reinterpret_cast<std::uint8_t*>(exeModule),
+            DescribeDLString(path ? &path->string : nullptr),
+            DescribeDLString(p4),
+            HexValue(static_cast<uintptr_t>(ctx.rdx)),
+            HexValue(static_cast<uintptr_t>(ctx.r8)));
+    }
 }
 
 bool PatchLayoutMarkerEntry(std::uint8_t* chunkStart, std::uint8_t* bufferStart, std::uint8_t* bufferEnd, std::string_view markerName)
@@ -560,20 +590,31 @@ void ResourcePathLogging()
     if (!bLogResourcePaths)
         return;
 
-    // ModEngine uses this Sekiro archive resolver as the point where virtual resource paths become loadable paths.
-    std::uint8_t* ArchivePathScanResult = Memory::PatternScan(exeModule, "40 55 56 41 54 41 55 48 83 EC 28 4D 8B E0");
-    if (ArchivePathScanResult) {
-        spdlog::info("Resource Path Log: Archive resolver address is {:s}+{:x}", sExeName.c_str(), ArchivePathScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        ResourcePathHook = safetyhook::create_inline(ArchivePathScanResult, SekiroArchivePathDetour);
-        if (ResourcePathHook) {
-            spdlog::info("Resource Path Log: Archive resolver hook installed.");
+    // ModEngine uses a Sekiro archive resolver as the point where virtual resource paths become loadable paths.
+    // Test3 logs all resolver-looking candidates because ModEngine may already have patched the first/expected one.
+    std::vector<std::uint8_t*> candidates = Memory::PatternScanAll(exeModule, "40 55 56 41 54 41 55 48 83 EC 28 4D 8B E0");
+    spdlog::info("Resource Path Candidate: found {} archive resolver candidate(s).", candidates.size());
+
+    ResourcePathCandidateHooks.reserve(candidates.size());
+    for (size_t i = 0; i < candidates.size(); i++) {
+        std::uint8_t* candidate = candidates[i];
+        spdlog::info("Resource Path Candidate: candidate #{} address is {:s}+{:x}", i, sExeName.c_str(), candidate - reinterpret_cast<std::uint8_t*>(exeModule));
+
+        auto hook = safetyhook::create_mid(candidate, [i, candidate](SafetyHookContext& ctx) {
+            LogResourcePathCandidateCall(i, candidate, ctx);
+        });
+
+        if (hook) {
+            spdlog::info("Resource Path Candidate: candidate #{} hook installed.", i);
+            ResourcePathCandidateHooks.emplace_back(std::move(hook));
         }
         else {
-            spdlog::error("Resource Path Log: Archive resolver hook failed to install.");
+            spdlog::error("Resource Path Candidate: candidate #{} hook failed to install.", i);
         }
     }
-    else {
-        spdlog::error("Resource Path Log: Archive resolver pattern scan failed.");
+
+    if (ResourcePathCandidateHooks.empty()) {
+        spdlog::error("Resource Path Candidate: no candidate hooks installed.");
     }
 }
 
