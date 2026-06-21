@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test10";
+std::string sFixVersion = "0.0.4-test11";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -506,7 +506,12 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionHorMidHook{};
             AwarenessMarkersTransitionHorMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio > fNativeAspect) {
+                    if (bHideAwarenessMarkers) {
+                        // Test11: hide the overhead marker, but keep culling forced onscreen below.
+                        ctx.xmm0.f32[0] = -100000.00f;
+                        ctx.xmm1.f32[0] = -99999.00f;
+                    }
+                    else if (fAspectRatio > fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                         ctx.xmm1.f32[0] = 1080.00f * fAspectRatio;
                     }
@@ -515,7 +520,12 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionVertMidHook{};
             AwarenessMarkersTransitionVertMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult + 0x2A,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio < fNativeAspect) {
+                    if (bHideAwarenessMarkers) {
+                        // Test11: hide the overhead marker, but keep culling forced onscreen below.
+                        ctx.xmm0.f32[0] = -100000.00f;
+                        ctx.xmm4.f32[0] = -99999.00f;
+                    }
+                    else if (fAspectRatio < fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
                         ctx.xmm4.f32[0] = 1920.00f / fAspectRatio;
                     }
@@ -525,11 +535,20 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersCullingMidHook{};
             AwarenessMarkersCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio > fNativeAspect) {
+                    if (!bHideAwarenessMarkers && fAspectRatio > fNativeAspect) {
                         ctx.xmm2.f32[0] += ((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                     }
-                    else if (fAspectRatio < fNativeAspect) {
+                    else if (!bHideAwarenessMarkers && fAspectRatio < fNativeAspect) {
                         ctx.xmm3.f32[0] += ((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
+                    }
+                });
+
+            static SafetyHookMid AwarenessMarkersHideCullingMidHook{};
+            AwarenessMarkersHideCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult + 0x7,
+                [](SafetyHookContext& ctx) {
+                    if (bHideAwarenessMarkers) {
+                        // Test11: report the marker as onscreen so the radar/directional fallback should not trigger.
+                        ctx.rflags &= ~1ULL;
                     }
                 });
         }
@@ -577,21 +596,6 @@ void HUD()
                         auto pGFXName = *reinterpret_cast<std::uint8_t**>(ctx.rax + 0x48);
                         std::string sGFXName = (char*)(pGFXName + 0xB);
                         spdlog::info("HUD: Scaleform GFX: Loaded {:s}", sGFXName);
-
-                        if (bHideAwarenessMarkers && sGFXName.contains("01_000_fe.gfx")) {
-                            static bool bStartedMarkerPatchThread = false;
-                            if (!bStartedMarkerPatchThread) {
-                                bStartedMarkerPatchThread = true;
-                                HANDLE hThread = CreateThread(nullptr, 0, DelayedPatchScaleformMarkerStringBlock, nullptr, 0, nullptr);
-                                if (hThread) {
-                                    CloseHandle(hThread);
-                                    spdlog::info("HUD: Layout: Test10 delayed marker atlas patch scheduled.");
-                                }
-                                else {
-                                    spdlog::warn("HUD: Layout: Test10 failed to schedule delayed marker atlas patch.");
-                                }
-                            }
-                        }
 
                         if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {
                             // Hide low-health/dying and stealth vignettes without touching fades/black screens.
