@@ -52,6 +52,8 @@ bool bFixAspect;
 bool bFixHUD;
 bool bDisableCameraReset;
 bool bAutoLoot;
+bool bHideAwarenessMarkers;
+bool bHideVignettes;
 bool bPreventDragonrot;
 bool bDisableDeathPenalties;
 bool bLogStats;
@@ -215,6 +217,8 @@ void Configuration()
     inipp::get_value(ini.sections["Gameplay FOV"], "Multiplier", fGameplayFOVMulti);
     inipp::get_value(ini.sections["Disable Camera Reset"], "Enabled", bDisableCameraReset);
     inipp::get_value(ini.sections["Auto Loot"], "Enabled", bAutoLoot);
+    inipp::get_value(ini.sections["Hide Awareness Markers"], "Enabled", bHideAwarenessMarkers);
+    inipp::get_value(ini.sections["Hide Vignettes"], "Enabled", bHideVignettes);
     inipp::get_value(ini.sections["Prevent Dragonrot"], "Enabled", bPreventDragonrot);
     inipp::get_value(ini.sections["Disable Death Penalties"], "Enabled", bDisableDeathPenalties);
     inipp::get_value(ini.sections["Log Stats"], "Enabled", bLogStats);
@@ -232,6 +236,8 @@ void Configuration()
     spdlog_confparse(fGameplayFOVMulti);
     spdlog_confparse(bDisableCameraReset);
     spdlog_confparse(bAutoLoot);
+    spdlog_confparse(bHideAwarenessMarkers);
+    spdlog_confparse(bHideVignettes);
     spdlog_confparse(bPreventDragonrot);
     spdlog_confparse(bDisableDeathPenalties);
     spdlog_confparse(bLogStats);
@@ -320,7 +326,10 @@ void AspectRatio()
         else {
             spdlog::error("Animation Culling Aspect Ratio: Pattern scan failed.");
         }
-        
+    }
+
+    if (bFixAspect || bHideAwarenessMarkers)
+    {
         // Awareness Markers 
         std::uint8_t* AwarenessMarkersTransitionScanResult = Memory::PatternScan(exeModule, "F3 0F ?? ?? ?? ?? 0F ?? ?? 72 ?? 0F ?? ?? F3 0F ?? ?? F3 0F ?? ?? 0F ?? ?? 72 ??");
         std::uint8_t* AwarenessMarkersCullingScanResult = Memory::PatternScan(exeModule, "0F ?? ?? 0F ?? ?? ?? 72 ?? F3 0F ?? ?? ?? ?? ?? ?? 0F 57 ?? 0F ?? ?? 72 ??");
@@ -329,7 +338,12 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionHorMidHook{};
             AwarenessMarkersTransitionHorMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio > fNativeAspect) {
+                    if (bHideAwarenessMarkers) {
+                        // Collapse marker transition bounds far offscreen.
+                        ctx.xmm0.f32[0] = -100000.00f;
+                        ctx.xmm1.f32[0] = -99999.00f;
+                    }
+                    else if (fAspectRatio > fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                         ctx.xmm1.f32[0] = 1080.00f * fAspectRatio;
                     }
@@ -338,7 +352,12 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersTransitionVertMidHook{};
             AwarenessMarkersTransitionVertMidHook = safetyhook::create_mid(AwarenessMarkersTransitionScanResult + 0x2A,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio < fNativeAspect) {
+                    if (bHideAwarenessMarkers) {
+                        // Collapse marker transition bounds far offscreen.
+                        ctx.xmm0.f32[0] = -100000.00f;
+                        ctx.xmm4.f32[0] = -99999.00f;
+                    }
+                    else if (fAspectRatio < fNativeAspect) {
                         ctx.xmm0.f32[0] = -((1920.00f / fAspectRatio) - 1080.00f) / 2.00f;
                         ctx.xmm4.f32[0] = 1920.00f / fAspectRatio;
                     }
@@ -348,7 +367,12 @@ void AspectRatio()
             static SafetyHookMid AwarenessMarkersCullingMidHook{};
             AwarenessMarkersCullingMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult,
                 [](SafetyHookContext& ctx) {
-                    if (fAspectRatio > fNativeAspect) {
+                    if (bHideAwarenessMarkers) {
+                        // Shrink marker culling bounds so awareness markers fail their visibility tests.
+                        ctx.xmm2.f32[0] = -100000.00f;
+                        ctx.xmm3.f32[0] = -100000.00f;
+                    }
+                    else if (fAspectRatio > fNativeAspect) {
                         ctx.xmm2.f32[0] += ((1080.00f * fAspectRatio) - 1920.00f) / 2.00f;
                     }
                     else if (fAspectRatio < fNativeAspect) {
@@ -359,7 +383,7 @@ void AspectRatio()
         else {
             spdlog::error("Awareness Markers: Pattern scan(s) failed.");
         }
-    }  
+    }
 }
 
 void FOV() 
@@ -384,7 +408,7 @@ void FOV()
 
 void HUD()
 {
-    if (bFixHUD) 
+    if (bFixHUD || bHideVignettes)
     {
         // Scaleform GFX
         std::uint8_t* LoadScaleformGFXScanResult = Memory::PatternScan(exeModule, "8B ?? 0F ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? 85 ??");
@@ -400,8 +424,15 @@ void HUD()
                         auto pGFXName = *reinterpret_cast<std::uint8_t**>(ctx.rax + 0x48);
                         std::string sGFXName = (char*)(pGFXName + 0xB);
 
+                        if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {
+                            // Hide low-health/dying and stealth vignettes without touching fades/black screens.
+                            ctx.xmm5.f32[0] = 0.00f;
+                            ctx.xmm7.f32[0] = 0.00f;
+                            return;
+                        }
+
                         // Stretch screen vignetting effects/fades
-                        if (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx") || sGFXName.contains("01_910_fade.gfx") || sGFXName.contains("01_900_black.gfx")) {
+                        if (bFixHUD && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx") || sGFXName.contains("01_910_fade.gfx") || sGFXName.contains("01_900_black.gfx"))) {
                             if (fAspectRatio > fNativeAspect)
                                 ctx.xmm5.f32[0] = static_cast<float>(iCurrentResY * fNativeAspect) * 20.00f;
                             else if (fAspectRatio < fNativeAspect)

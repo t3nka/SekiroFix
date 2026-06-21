@@ -11,6 +11,8 @@
 - Borderless windowed mode.
 - Disable camera reset when locking on with no valid target.
 - Automatically pick up enemy loot.
+- Hide enemy awareness/directional detection markers.
+- Hide low-health/dying and stealth vignette effects.
 - Prevent Dragonrot from increasing on death.
 - Disable Sen and Skill Experience death penalties.
 - Log death and kill counters to text files.
@@ -34,6 +36,8 @@
 - Open **`SekiroFix.ini`** to adjust settings.
 - Set **`[Disable Camera Reset] Enabled = true`** to stop camera centering when lock-on is pressed without a target.
 - Set **`[Auto Loot] Enabled = true`** to automatically pick up enemy loot.
+- Set **`[Hide Awareness Markers] Enabled = true`** to hide enemy awareness/directional detection markers.
+- Set **`[Hide Vignettes] Enabled = true`** to hide low-health/dying and stealth screen vignette effects. This does not hide black screens or fade transitions.
 - Set **`[Prevent Dragonrot] Enabled = true`** to stop Dragonrot increasing when you die.
 - Set **`[Disable Death Penalties] Enabled = true`** to stop Sen and Skill Experience loss when you die.
 - Set **`[Log Stats] Enabled = true`** to write `DeathCounter.txt` and `TotalKillsCounter.txt` to the game folder every 2 seconds.
