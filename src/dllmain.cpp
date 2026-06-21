@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test1";
+std::string sFixVersion = "0.0.4-test2";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -369,8 +369,8 @@ void AspectRatio()
             AwarenessMarkersHideMidHook = safetyhook::create_mid(AwarenessMarkersCullingScanResult + 0x7,
                 [](SafetyHookContext& ctx) {
                     if (bHideAwarenessMarkers) {
-                        // Test 1: force the conditional branch after the culling comparison to take the carry path.
-                        ctx.rflags |= 1ULL;
+                        // Test 2: force the conditional branch after the culling comparison to avoid the carry path.
+                        ctx.rflags &= ~1ULL;
                     }
                 });
         }
