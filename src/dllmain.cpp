@@ -24,7 +24,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-resource-log-test3";
+std::string sFixVersion = "0.0.4-resource-redirect-test4";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -87,11 +87,13 @@ struct SekiroString
 };
 
 using SekiroArchivePathFn = void* (*)(SekiroString*, std::uint64_t, std::uint64_t, DLString*, std::uint64_t, std::uint64_t);
-
 SafetyHookInline ResourcePathHook{};
+SafetyHookInline CreateFileAHook{};
+SafetyHookInline CreateFileWHook{};
 std::vector<SafetyHookMid> ResourcePathCandidateHooks{};
 std::atomic_uint64_t ResourcePathCallCount = 0;
 std::atomic_uint64_t ResourcePathCandidateCallCount = 0;
+std::atomic_uint64_t ResourcePathRedirectCount = 0;
 std::mutex ResourcePathLogMutex;
 std::unordered_set<std::wstring> LoggedResourcePaths;
 
@@ -307,6 +309,137 @@ void LogResourcePathCandidateCall(SafetyHookContext& ctx)
             DescribeDLString(p4),
             HexValue(static_cast<uintptr_t>(ctx.rdx)),
             HexValue(static_cast<uintptr_t>(ctx.r8)));
+    }
+}
+
+std::wstring LowerPath(std::wstring value)
+{
+    std::replace(value.begin(), value.end(), L'/', L'\\');
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    return value;
+}
+
+std::string LowerPath(std::string value)
+{
+    std::replace(value.begin(), value.end(), '/', '\\');
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool PathEndsWith(std::wstring_view value, std::wstring_view suffix)
+{
+    return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool PathEndsWith(std::string_view value, std::string_view suffix)
+{
+    return value.size() >= suffix.size() && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+HANDLE WINAPI CreateFileADetour(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+    DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+{
+    LPCSTR fileName = lpFileName;
+    std::string redirectPath;
+
+    if (bHideAwarenessMarkers && lpFileName) {
+        const std::string requestedPath = LowerPath(lpFileName);
+        constexpr std::string_view targetSuffix = "menu\\hi\\01_common.sblytbnd.dcx";
+
+        if (PathEndsWith(requestedPath, targetSuffix)) {
+            const std::filesystem::path localBinderPath = sFixPath / "SekiroFix" / "menu" / "hi" / "01_common.sblytbnd.dcx";
+
+            if (std::filesystem::exists(localBinderPath)) {
+                redirectPath = localBinderPath.string();
+                fileName = redirectPath.c_str();
+
+                const auto count = ++ResourcePathRedirectCount;
+                spdlog::info("Resource Redirect: redirected CreateFileA 01_common.sblytbnd.dcx open #{} from {:s} to {:s}",
+                    count, lpFileName, redirectPath);
+            }
+            else {
+                spdlog::warn("Resource Redirect: wanted to redirect CreateFileA 01_common.sblytbnd.dcx but file is missing: {:s}",
+                    localBinderPath.string());
+            }
+        }
+    }
+
+    return CreateFileAHook.call<HANDLE>(fileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+HANDLE WINAPI CreateFileWDetour(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+    DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile)
+{
+    LPCWSTR fileName = lpFileName;
+    std::wstring redirectPath;
+
+    if (bHideAwarenessMarkers && lpFileName) {
+        const std::wstring requestedPath = LowerPath(lpFileName);
+        constexpr std::wstring_view targetSuffix = L"menu\\hi\\01_common.sblytbnd.dcx";
+
+        if (PathEndsWith(requestedPath, targetSuffix)) {
+            const std::filesystem::path localBinderPath = sFixPath / "SekiroFix" / "menu" / "hi" / "01_common.sblytbnd.dcx";
+
+            if (std::filesystem::exists(localBinderPath)) {
+                redirectPath = localBinderPath.wstring();
+                fileName = redirectPath.c_str();
+
+                const auto count = ++ResourcePathRedirectCount;
+                spdlog::info("Resource Redirect: redirected CreateFileW 01_common.sblytbnd.dcx open #{} from {:s} to {:s}",
+                    count, WideToUtf8(lpFileName), WideToUtf8(redirectPath));
+            }
+            else {
+                spdlog::warn("Resource Redirect: wanted to redirect CreateFileW 01_common.sblytbnd.dcx but file is missing: {:s}",
+                    localBinderPath.string());
+            }
+        }
+    }
+
+    return CreateFileWHook.call<HANDLE>(fileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes,
+        dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+}
+
+void ResourcePathRedirect()
+{
+    if (!bHideAwarenessMarkers)
+        return;
+
+    HMODULE kernel32Module = GetModuleHandleW(L"kernel32.dll");
+    if (!kernel32Module) {
+        spdlog::error("Resource Redirect: Failed to find kernel32.dll.");
+        return;
+    }
+
+    void* createFileAAddress = GetProcAddress(kernel32Module, "CreateFileA");
+    void* createFileWAddress = GetProcAddress(kernel32Module, "CreateFileW");
+    if (!createFileAAddress) {
+        spdlog::error("Resource Redirect: Failed to find CreateFileA.");
+        return;
+    }
+
+    if (!createFileWAddress) {
+        spdlog::error("Resource Redirect: Failed to find CreateFileW.");
+        return;
+    }
+
+    const std::filesystem::path localBinderPath = sFixPath / "SekiroFix" / "menu" / "hi" / "01_common.sblytbnd.dcx";
+    spdlog::info("Resource Redirect: 01_common.sblytbnd.dcx override path is {:s}", localBinderPath.string());
+
+    CreateFileAHook = safetyhook::create_inline(createFileAAddress, CreateFileADetour);
+    if (CreateFileAHook) {
+        spdlog::info("Resource Redirect: CreateFileA hook installed.");
+    }
+    else {
+        spdlog::error("Resource Redirect: CreateFileA hook failed to install.");
+    }
+
+    CreateFileWHook = safetyhook::create_inline(createFileWAddress, CreateFileWDetour);
+    if (CreateFileWHook) {
+        spdlog::info("Resource Redirect: CreateFileW hook installed.");
+    }
+    else {
+        spdlog::error("Resource Redirect: CreateFileW hook failed to install.");
     }
 }
 
@@ -1035,6 +1168,7 @@ DWORD __stdcall Main(void*)
     AspectRatio();
     FOV();
     ResourcePathLogging();
+    ResourcePathRedirect();
     HUD();
     Gameplay();
     Stats();
