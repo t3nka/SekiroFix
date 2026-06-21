@@ -182,33 +182,25 @@ void LogScaleformStringMatches()
             if (mbi.State == MEM_COMMIT && IsScannableProtect(mbi.Protect)) {
                 std::uint8_t* searchStart = regionStart;
 
-                __try
-                {
-                    while (searchStart + target.size() <= regionEnd) {
-                        auto match = std::search(searchStart, regionEnd, target.begin(), target.end());
-                        if (match == regionEnd)
-                            break;
+                while (searchStart + target.size() <= regionEnd) {
+                    auto match = std::search(searchStart, regionEnd, target.begin(), target.end());
+                    if (match == regionEnd)
+                        break;
 
-                        matches++;
-                        spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
-                            target,
-                            HexValue(reinterpret_cast<uintptr_t>(match)),
-                            HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
-                            HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
-                            mbi.Protect,
-                            mbi.Type,
-                            IsWritableProtect(mbi.Protect),
-                            ReadAsciiPreview(match, 80));
+                    matches++;
+                    spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
+                        target,
+                        HexValue(reinterpret_cast<uintptr_t>(match)),
+                        HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
+                        HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
+                        mbi.Protect,
+                        mbi.Type,
+                        IsWritableProtect(mbi.Protect),
+                        ReadAsciiPreview(match, 80));
 
-                        searchStart = match + target.size();
-                        if (matches >= 20)
-                            break;
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    spdlog::warn("HUD: Scaleform GFX: Test5 skipped unreadable region {:s} while scanning '{:s}'",
-                        HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)), target);
+                    searchStart = match + target.size();
+                    if (matches >= 20)
+                        break;
                 }
             }
 
