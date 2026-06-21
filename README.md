@@ -1,7 +1,6 @@
 # SekiroFix
-[![Patreon-Button](.github/images/Patreon-Button.png)](https://www.patreon.com/Wintermance) [![ko-fi](.github/images/Kofi-Button.svg)](https://ko-fi.com/W7W01UAI9)
 
-**SekiroFix** is an ASI plugin for **Sekiro: Shadows Die Twice** that can unlock the framerate, add ultrawide/narrower support and more.
+**SekiroFix** is t3nka's maintained fork of Lyall's ASI plugin for **Sekiro: Shadows Die Twice**. It keeps the framerate, FOV, borderless, and ultrawide/narrower fixes from the original project, then adds optional gameplay and HUD tweaks for a cleaner playthrough.
 
 ## Features
 
@@ -33,15 +32,20 @@
 - Open up the game properties in your launcher and add `WINEDLLOVERRIDES="winmm=n,b" %command%` to the launch options.
 
 ## Configuration
-- Open **`SekiroFix.ini`** to adjust settings.
-- Set **`[Disable Camera Reset] Enabled = true`** to stop camera centering when lock-on is pressed without a target.
-- Set **`[Auto Loot] Enabled = true`** to automatically pick up enemy loot.
-- Set **`[Hide Awareness Markers] Enabled = true`** to hide enemy awareness/directional detection markers.
-- Set **`[Hide Vignettes] Enabled = true`** to hide low-health/dying and stealth screen vignette effects. This does not hide black screens or fade transitions.
-- Set **`[Prevent Dragonrot] Enabled = true`** to stop Dragonrot increasing when you die.
-- Set **`[Disable Death Penalties] Enabled = true`** to stop Sen and Skill Experience loss when you die.
-- Set **`[Log Stats] Enabled = true`** to write `DeathCounter.txt` and `TotalKillsCounter.txt` to the game folder every 2 seconds.
-- Set **`[Spirit Emblem Upgrade] Enabled = true`** to make prosthetic skill-tree upgrades increase Spirit Emblem capacity by 1. This permanently affects save progression once the upgrade is applied.
+- **Borderless Windowed** - Makes windowed mode run borderless.
+- **Gameplay FOV** - Adjusts the gameplay FOV multiplier.
+- **Disable Camera Reset** - Stops camera centering when lock-on is pressed without a valid target.
+- **Auto Loot** - Automatically picks up enemy loot.
+- **Hide Awareness Markers** - Hides enemy awareness/directional detection markers.
+- **Hide Vignettes** - Hides low-health/dying and stealth screen vignette effects without hiding black screens or fade transitions.
+- **Prevent Dragonrot** - Stops Dragonrot increasing when you die.
+- **Disable Death Penalties** - Stops Sen and Skill Experience loss when you die.
+- **Log Stats** - Writes `DeathCounter.txt` and `TotalKillsCounter.txt` to the game folder every 2 seconds.
+- **Spirit Emblem Upgrade** - Makes prosthetic skill-tree upgrades increase Spirit Emblem capacity by 1. This permanently affects save progression once the upgrade is applied.
+- **Unlock Framerate** - Unlocks the 60 FPS cap.
+- **Unlock Resolutions** - Unlocks the windowed mode resolution list.
+- **Fix Aspect Ratio** - Stops 16:9 scaling and fixes aspect-ratio-related issues.
+- **Fix HUD** - Fixes vignettes and fades at ultrawide/narrower resolutions.
 
 ## Screenshots
 | ![animated-comparison](.github/images/sekiro_comparison.png) |

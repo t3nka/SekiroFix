@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.3";
+std::string sFixVersion = "0.0.4";
 std::filesystem::path sFixPath;
 
 // Ini
