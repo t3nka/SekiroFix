@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4";
+std::string sFixVersion = "0.0.4-gfxlog";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -408,7 +408,7 @@ void FOV()
 
 void HUD()
 {
-    if (bFixHUD || bHideVignettes)
+    if (true)
     {
         // Scaleform GFX
         std::uint8_t* LoadScaleformGFXScanResult = Memory::PatternScan(exeModule, "8B ?? 0F ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? ?? F3 0F ?? ?? 85 ??");
@@ -423,6 +423,7 @@ void HUD()
                         // Get loaded .gfx file name
                         auto pGFXName = *reinterpret_cast<std::uint8_t**>(ctx.rax + 0x48);
                         std::string sGFXName = (char*)(pGFXName + 0xB);
+                        spdlog::info("HUD: Scaleform GFX: Loaded {:s}", sGFXName);
 
                         if (bHideVignettes && (sGFXName.contains("01_201_stealtheffect.gfx") || sGFXName.contains("01_200_dyingeffect.gfx"))) {
                             // Hide low-health/dying and stealth vignettes without touching fades/black screens.
