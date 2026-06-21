@@ -12,6 +12,9 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <inipp/inipp.h>
 #include <safetyhook.hpp>
+#include <cwctype>
+#include <mutex>
+#include <unordered_set>
 
 #define spdlog_confparse(var) spdlog::info("Config Parse: {}: {}", #var, var)
 
@@ -20,7 +23,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test12";
+std::string sFixVersion = "0.0.4-resource-log-test1";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -54,6 +57,7 @@ bool bDisableCameraReset;
 bool bAutoLoot;
 bool bHideAwarenessMarkers;
 bool bHideVignettes;
+bool bLogResourcePaths;
 bool bPreventDragonrot;
 bool bDisableDeathPenalties;
 bool bLogStats;
@@ -66,6 +70,26 @@ int iCurrentResY;
 float fCurrentFramerate;
 std::uint8_t* pPlayerDeaths;
 std::uint8_t* pTotalKills;
+
+struct DLString
+{
+    wchar_t* string;
+    void* unk;
+    std::uint64_t length;
+    std::uint64_t capacity;
+};
+
+struct SekiroString
+{
+    void* unk;
+    DLString string;
+};
+
+using SekiroArchivePathFn = void* (*)(SekiroString*, std::uint64_t, std::uint64_t, DLString*, std::uint64_t, std::uint64_t);
+
+SafetyHookInline ResourcePathHook{};
+std::mutex ResourcePathLogMutex;
+std::unordered_set<std::wstring> LoggedResourcePaths;
 
 bool IsReadableAddress(std::uint8_t* address, size_t size)
 {
@@ -146,6 +170,75 @@ void PatchLayoutDimension(std::uint8_t* address, size_t digitCount)
 {
     std::string zeroes(digitCount, '0');
     Memory::PatchBytes(address, zeroes.c_str(), static_cast<unsigned int>(zeroes.size()));
+}
+
+std::string WideToUtf8(std::wstring_view value)
+{
+    if (value.empty())
+        return {};
+
+    const int requiredSize = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (requiredSize <= 0)
+        return {};
+
+    std::string result(requiredSize, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), requiredSize, nullptr, nullptr);
+    return result;
+}
+
+std::wstring ReadDLString(const DLString* value)
+{
+    if (!value || !value->string || value->length == 0 || value->length > 1024 || value->capacity < value->length)
+        return {};
+
+    if (!IsReadableAddress(reinterpret_cast<std::uint8_t*>(value->string), static_cast<size_t>(value->length) * sizeof(wchar_t)))
+        return {};
+
+    size_t length = static_cast<size_t>(value->length);
+    if (length > 0 && value->string[length - 1] == L'\0')
+        length--;
+
+    return std::wstring(value->string, length);
+}
+
+bool IsInterestingResourcePath(std::wstring path)
+{
+    std::transform(path.begin(), path.end(), path.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+
+    return path.find(L"menu") != std::wstring::npos ||
+        path.find(L"01_common") != std::wstring::npos ||
+        path.find(L"sb_fe") != std::wstring::npos ||
+        path.find(L"sb_dying") != std::wstring::npos ||
+        path.find(L".gfx") != std::wstring::npos ||
+        path.find(L".layout") != std::wstring::npos ||
+        path.find(L".dcx") != std::wstring::npos ||
+        path.find(L".bnd") != std::wstring::npos;
+}
+
+void LogResourcePath(std::string_view label, const DLString* path)
+{
+    const std::wstring value = ReadDLString(path);
+    if (value.empty() || !IsInterestingResourcePath(value))
+        return;
+
+    std::scoped_lock lock(ResourcePathLogMutex);
+    const auto [_, inserted] = LoggedResourcePaths.insert(value);
+    if (!inserted)
+        return;
+
+    spdlog::info("Resource Path Log: {:s}: {:s}", std::string(label), WideToUtf8(value));
+}
+
+void* SekiroArchivePathDetour(SekiroString* path, std::uint64_t p2, std::uint64_t p3, DLString* p4, std::uint64_t p5, std::uint64_t p6)
+{
+    LogResourcePath("input", path ? &path->string : nullptr);
+
+    void* result = ResourcePathHook.call<void*>(path, p2, p3, p4, p5, p6);
+
+    if (result)
+        LogResourcePath("output", &reinterpret_cast<SekiroString*>(result)->string);
+
+    return result;
 }
 
 bool PatchLayoutMarkerEntry(std::uint8_t* chunkStart, std::uint8_t* bufferStart, std::uint8_t* bufferEnd, std::string_view markerName)
@@ -387,6 +480,7 @@ void Configuration()
     inipp::get_value(ini.sections["Auto Loot"], "Enabled", bAutoLoot);
     inipp::get_value(ini.sections["Hide Awareness Markers"], "Enabled", bHideAwarenessMarkers);
     inipp::get_value(ini.sections["Hide Vignettes"], "Enabled", bHideVignettes);
+    inipp::get_value(ini.sections["Debug Resource Path Log"], "Enabled", bLogResourcePaths);
     inipp::get_value(ini.sections["Prevent Dragonrot"], "Enabled", bPreventDragonrot);
     inipp::get_value(ini.sections["Disable Death Penalties"], "Enabled", bDisableDeathPenalties);
     inipp::get_value(ini.sections["Log Stats"], "Enabled", bLogStats);
@@ -406,6 +500,7 @@ void Configuration()
     spdlog_confparse(bAutoLoot);
     spdlog_confparse(bHideAwarenessMarkers);
     spdlog_confparse(bHideVignettes);
+    spdlog_confparse(bLogResourcePaths);
     spdlog_confparse(bPreventDragonrot);
     spdlog_confparse(bDisableDeathPenalties);
     spdlog_confparse(bLogStats);
@@ -416,6 +511,28 @@ void Configuration()
     spdlog_confparse(bFixHUD);
 
     spdlog::info("----------");
+}
+
+void ResourcePathLogging()
+{
+    if (!bLogResourcePaths)
+        return;
+
+    // ModEngine uses this Sekiro archive resolver as the point where virtual resource paths become loadable paths.
+    std::uint8_t* ArchivePathScanResult = Memory::PatternScan(exeModule, "40 55 56 41 54 41 55 48 83 EC 28 4D 8B E0");
+    if (ArchivePathScanResult) {
+        spdlog::info("Resource Path Log: Archive resolver address is {:s}+{:x}", sExeName.c_str(), ArchivePathScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+        ResourcePathHook = safetyhook::create_inline(ArchivePathScanResult, SekiroArchivePathDetour);
+        if (ResourcePathHook) {
+            spdlog::info("Resource Path Log: Archive resolver hook installed.");
+        }
+        else {
+            spdlog::error("Resource Path Log: Archive resolver hook failed to install.");
+        }
+    }
+    else {
+        spdlog::error("Resource Path Log: Archive resolver pattern scan failed.");
+    }
 }
 
 void Resolution() 
@@ -839,6 +956,7 @@ DWORD __stdcall Main(void*)
     Resolution();
     AspectRatio();
     FOV();
+    ResourcePathLogging();
     HUD();
     Gameplay();
     Stats();
