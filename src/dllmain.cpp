@@ -20,7 +20,7 @@ HMODULE thisModule;
 
 // Fix details
 std::string sFixName = "SekiroFix";
-std::string sFixVersion = "0.0.4-test5";
+std::string sFixVersion = "0.0.4-test5b";
 std::filesystem::path sFixPath;
 
 // Ini
@@ -170,49 +170,70 @@ void LogScaleformStringMatches()
 
     spdlog::info("HUD: Scaleform GFX: Test5 marker string scan starting.");
 
-    for (const auto& target : targets) {
-        size_t matches = 0;
-        std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
-        MEMORY_BASIC_INFORMATION mbi{};
+    constexpr size_t iChunkSize = 1024 * 1024;
+    constexpr size_t iMaxMatchesPerTarget = 5;
+    std::vector<std::uint8_t> buffer(iChunkSize);
+    std::vector<size_t> matchCounts(targets.size(), 0);
 
-        while (VirtualQuery(address, &mbi, sizeof(mbi))) {
-            auto regionStart = reinterpret_cast<std::uint8_t*>(mbi.BaseAddress);
-            auto regionEnd = regionStart + mbi.RegionSize;
+    std::uint8_t* address = reinterpret_cast<std::uint8_t*>(0x10000);
+    MEMORY_BASIC_INFORMATION mbi{};
 
-            if (mbi.State == MEM_COMMIT && IsScannableProtect(mbi.Protect)) {
-                std::uint8_t* searchStart = regionStart;
+    while (VirtualQuery(address, &mbi, sizeof(mbi))) {
+        auto regionStart = reinterpret_cast<std::uint8_t*>(mbi.BaseAddress);
+        auto regionEnd = regionStart + mbi.RegionSize;
 
-                while (searchStart + target.size() <= regionEnd) {
-                    auto match = std::search(searchStart, regionEnd, target.begin(), target.end());
-                    if (match == regionEnd)
-                        break;
+        if (mbi.State == MEM_COMMIT && mbi.Type != MEM_IMAGE && IsScannableProtect(mbi.Protect)) {
+            for (std::uint8_t* chunkStart = regionStart; chunkStart < regionEnd;) {
+                size_t bytesToRead = static_cast<size_t>(std::min<uintptr_t>(iChunkSize, regionEnd - chunkStart));
+                SIZE_T bytesRead = 0;
 
-                    matches++;
-                    spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
-                        target,
-                        HexValue(reinterpret_cast<uintptr_t>(match)),
-                        HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
-                        HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
-                        mbi.Protect,
-                        mbi.Type,
-                        IsWritableProtect(mbi.Protect),
-                        ReadAsciiPreview(match, 80));
+                if (ReadProcessMemory(GetCurrentProcess(), chunkStart, buffer.data(), bytesToRead, &bytesRead)) {
+                    for (size_t i = 0; i < targets.size(); i++) {
+                        const auto& target = targets[i];
+                        if (matchCounts[i] >= iMaxMatchesPerTarget || bytesRead < target.size())
+                            continue;
 
-                    searchStart = match + target.size();
-                    if (matches >= 20)
-                        break;
+                        auto searchStart = buffer.data();
+                        auto searchEnd = buffer.data() + bytesRead;
+
+                        while (searchStart + target.size() <= searchEnd) {
+                            auto match = std::search(searchStart, searchEnd, target.begin(), target.end());
+                            if (match == searchEnd)
+                                break;
+
+                            auto matchAddress = chunkStart + (match - buffer.data());
+                            matchCounts[i]++;
+                            spdlog::info("HUD: Scaleform GFX: Test5 found '{:s}' at {:s} region={:s} size={:s} protect=0x{:X} type=0x{:X} writable={} preview='{:s}'",
+                                target,
+                                HexValue(reinterpret_cast<uintptr_t>(matchAddress)),
+                                HexValue(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
+                                HexValue(static_cast<uintptr_t>(mbi.RegionSize)),
+                                mbi.Protect,
+                                mbi.Type,
+                                IsWritableProtect(mbi.Protect),
+                                ReadAsciiPreview(matchAddress, 80));
+
+                            searchStart = match + target.size();
+                            if (matchCounts[i] >= iMaxMatchesPerTarget)
+                                break;
+                        }
+                    }
                 }
+
+                auto nextChunk = chunkStart + bytesToRead;
+                if (nextChunk <= chunkStart)
+                    break;
+                chunkStart = nextChunk;
             }
-
-            if (regionEnd <= address)
-                break;
-            address = regionEnd;
-
-            if (matches >= 20)
-                break;
         }
 
-        spdlog::info("HUD: Scaleform GFX: Test5 scan complete for '{:s}', matches={}", target, matches);
+        if (regionEnd <= address)
+            break;
+        address = regionEnd;
+    }
+
+    for (size_t i = 0; i < targets.size(); i++) {
+        spdlog::info("HUD: Scaleform GFX: Test5 scan complete for '{:s}', matches={}", targets[i], matchCounts[i]);
     }
 
     spdlog::info("HUD: Scaleform GFX: Test5 marker string scan finished.");
