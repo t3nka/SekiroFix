@@ -58,6 +58,7 @@ bool bPreventDragonrot;
 bool bDisableDeathPenalties;
 bool bLogStats;
 bool bSpiritEmblemUpgrade;
+bool bIntroSkip;
 float fGameplayFOVMulti;
 
 // Variables
@@ -227,6 +228,7 @@ void Configuration()
     inipp::get_value(ini.sections["Unlock Resolutions"], "Enabled", bUnlockResolutions);
     inipp::get_value(ini.sections["Fix Aspect Ratio"], "Enabled", bFixAspect);
     inipp::get_value(ini.sections["Fix HUD"], "Enabled", bFixHUD);
+    inipp::get_value(ini.sections["Intro Skip"], "Enabled", bIntroSkip);
 
     // Clamp settings
     fGameplayFOVMulti = std::clamp(fGameplayFOVMulti, 0.01f, 4.00f);
@@ -246,6 +248,7 @@ void Configuration()
     spdlog_confparse(bUnlockResolutions);
     spdlog_confparse(bFixAspect);
     spdlog_confparse(bFixHUD);
+    spdlog_confparse(bIntroSkip);
 
     spdlog::info("----------");
 }
@@ -531,6 +534,52 @@ void Gameplay()
     }
 }
 
+void IntroSkip()
+{
+    if (bIntroSkip)
+    {
+        // Base on prior art: https://github.com/rootBrz/SekiroImGui/blob/6da9d01742e92a04bfb695bd46d80989ca8df16e/patches.cpp#L78-L88
+        constexpr uintptr_t introskip_offset = 0xE1B51B; // same offset used by rootBrz/SekiroImGui
+        auto addr = reinterpret_cast<std::uint8_t*>(exeModule) + introskip_offset;
+
+        // Read current byte and only patch if needed
+        std::uint8_t current = 0;
+        if (ReadMemory(addr, current))
+        {
+            spdlog::info("Gameplay: Intro Skip: Address is {:s}+{:x} (current byte 0x{:02x})", sExeName.c_str(), addr - reinterpret_cast<std::uint8_t*>(exeModule), current);
+            if (current == 0x74) // JE -> change to JNE
+            {
+                Memory::PatchBytes(addr, "\x75", 1);
+                spdlog::info("Gameplay: Intro Skip applied (0x74 -> 0x75).");
+            }
+            else if (current == 0x75)
+            {
+                spdlog::info("Gameplay: Intro Skip already applied.");
+            }
+            else
+            {
+                spdlog::warn("Gameplay: Intro Skip: unexpected byte 0x{:02x} at offset; skipping patch.", current);
+            }
+        }
+        else
+        {
+            spdlog::error("Gameplay: Intro Skip: failed to read target byte; skipping patch.");
+        }
+    }
+    else
+    {
+        // Attempt to restore original JE if currently patched, if the user toggles it off again.
+        constexpr uintptr_t introskip_offset = 0xE1B51B;
+        auto addr = reinterpret_cast<std::uint8_t*>(exeModule) + introskip_offset;
+        std::uint8_t current = 0;
+        if (ReadMemory(addr, current) && current == 0x75)
+        {
+            Memory::PatchBytes(addr, "\x74", 1);
+            spdlog::info("Gameplay: Intro Skip disabled (0x75 -> 0x74).");
+        }
+    }
+}
+
 DWORD __stdcall StatsThread(void*)
 {
     while (true)
@@ -672,6 +721,7 @@ DWORD __stdcall Main(void*)
 {
     Logging();
     Configuration();
+    IntroSkip();
     Resolution();
     AspectRatio();
     FOV();

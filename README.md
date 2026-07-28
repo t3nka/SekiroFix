@@ -46,6 +46,7 @@
 - **Unlock Resolutions** - Unlocks the windowed mode resolution list.
 - **Fix Aspect Ratio** - Stops 16:9 scaling and fixes aspect-ratio-related issues.
 - **Fix HUD** - Fixes vignettes and fades at ultrawide/narrower resolutions.
+- **Intro Skip** - Skips logos from intro.
 
 ## Screenshots
 | ![animated-comparison](.github/images/sekiro_comparison.png) |
@@ -59,3 +60,4 @@ Thanks to **Hotiraripha** for commissioning this fix! <br />
 [inipp](https://github.com/mcmtroffaes/inipp) for ini reading. <br />
 [spdlog](https://github.com/gabime/spdlog) for logging. <br />
 [safetyhook](https://github.com/cursey/safetyhook) for hooking.
+[SekiroImGui](https://github.com/rootBrz/SekiroImGui) and Katalash (Sekiro Mod Engine) for figuring out the memory address for the intro.
