@@ -24,7 +24,7 @@
 - Fixed animation culling at wider aspect ratios.
 
 ## Installation  
-- Download the latest [release](../../../releases). 
+- Download the latest [release](https://github.com/t3nka/SekiroFix/releases). 
 - Extract the contents of the release zip in to the the game folder. (e.g **steamapps\common\Sekiro** for Steam)
 
 ### Steam Deck/Linux Additional Instructions
