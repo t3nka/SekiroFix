@@ -531,10 +531,90 @@ void Gameplay()
     }
 }
 
+bool ResolveStatsPointers()
+{
+    // The pattern locations are stable for the lifetime of the process, but
+    // the game objects they reference may not exist until a save/world loads.
+    static std::uint8_t* PlayerDeathsScanResult = nullptr;
+    static std::uint8_t* TotalKillsScanResult = nullptr;
+    static bool patternsScanned = false;
+
+    if (!patternsScanned)
+    {
+        patternsScanned = true;
+
+        PlayerDeathsScanResult = Memory::PatternScan(exeModule, "0F B6 48 ?? 88 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00 89 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00");
+        if (PlayerDeathsScanResult)
+            spdlog::info("Stats: Player Deaths: Address is {:s}+{:x}", sExeName.c_str(), PlayerDeathsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+        else
+            spdlog::error("Stats: Player Deaths: Pattern scan failed.");
+
+        TotalKillsScanResult = Memory::PatternScan(exeModule, "48 ?? D8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 ?? ?? 48 89 ?? ?? ?? 48 8B ?? 08");
+        if (TotalKillsScanResult)
+            spdlog::info("Stats: Total Kills: Address is {:s}+{:x}", sExeName.c_str(), TotalKillsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
+        else
+            spdlog::error("Stats: Total Kills: Pattern scan failed.");
+    }
+
+    pPlayerDeaths = nullptr;
+    pTotalKills = nullptr;
+
+    if (PlayerDeathsScanResult)
+    {
+        std::uint8_t* playerStatsRelatedRef = Memory::GetAbsolute(PlayerDeathsScanResult + 0x20);
+        std::uint8_t* playerStatsRelated = nullptr;
+        std::int32_t deathOffset = 0;
+
+        if (ReadMemory(playerStatsRelatedRef, playerStatsRelated) &&
+            playerStatsRelated &&
+            ReadMemory(PlayerDeathsScanResult + 0x26, deathOffset))
+        {
+            pPlayerDeaths = playerStatsRelated + deathOffset;
+        }
+    }
+
+    if (TotalKillsScanResult)
+    {
+        std::uint8_t* totalKillsRef = Memory::GetAbsolute(TotalKillsScanResult + 0x0A);
+        std::uint8_t* totalKillsFirst = nullptr;
+        std::uint8_t* totalKillsSecond = nullptr;
+
+        if (ReadMemory(totalKillsRef, totalKillsFirst) &&
+            totalKillsFirst &&
+            ReadMemory(totalKillsFirst + 0x08, totalKillsSecond) &&
+            totalKillsSecond)
+        {
+            pTotalKills = totalKillsSecond + 0x00DC;
+        }
+    }
+
+    return pPlayerDeaths && pTotalKills;
+}
+
 DWORD __stdcall StatsThread(void*)
 {
+    bool waitingForStats = false;
+
     while (true)
     {
+        if (!pPlayerDeaths || !pTotalKills)
+        {
+            if (!ResolveStatsPointers())
+            {
+                if (!waitingForStats)
+                {
+                    spdlog::info("Stats: Waiting for counter objects to become available (load a save / enter the game world).");
+                    waitingForStats = true;
+                }
+
+                Sleep(2000);
+                continue;
+            }
+
+            spdlog::info("Stats: Counter pointers resolved; stat logging active.");
+            waitingForStats = false;
+        }
+
         int deaths = 0;
         int totalKills = 0;
 
@@ -545,13 +625,22 @@ DWORD __stdcall StatsThread(void*)
             std::ofstream deathsFile(sExePath / "DeathCounter.txt", std::ios::trunc);
             if (deathsFile.is_open())
                 deathsFile << deaths;
+            else
+                spdlog::error("Stats: Failed to open DeathCounter.txt for writing.");
 
             std::ofstream killsFile(sExePath / "TotalKillsCounter.txt", std::ios::trunc);
             if (killsFile.is_open())
                 killsFile << kills;
+            else
+                spdlog::error("Stats: Failed to open TotalKillsCounter.txt for writing.");
         }
-        else {
-            spdlog::error("Stats: Failed to read counter pointer(s).");
+        else
+        {
+            // Loading screens, returning to the title screen, or switching
+            // saves can invalidate runtime objects. Re-resolve next pass.
+            spdlog::info("Stats: Counter pointers became unavailable; waiting to re-resolve them.");
+            pPlayerDeaths = nullptr;
+            pTotalKills = nullptr;
         }
 
         Sleep(2000);
@@ -563,50 +652,14 @@ void Stats()
     if (!bLogStats)
         return;
 
-    std::uint8_t* PlayerDeathsScanResult = Memory::PatternScan(exeModule, "0F B6 48 ?? 88 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00 89 8B ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? 00 00");
-    if (PlayerDeathsScanResult) {
-        std::uint8_t* playerStatsRelatedRef = Memory::GetAbsolute(PlayerDeathsScanResult + 0x20);
-        std::uint8_t* playerStatsRelated = nullptr;
-        std::int32_t deathOffset = 0;
-
-        if (ReadMemory(playerStatsRelatedRef, playerStatsRelated) && ReadMemory(PlayerDeathsScanResult + 0x26, deathOffset)) {
-            pPlayerDeaths = playerStatsRelated + deathOffset;
-            spdlog::info("Stats: Player Deaths: Address is {:s}+{:x}", sExeName.c_str(), PlayerDeathsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        }
-        else {
-            spdlog::error("Stats: Player Deaths: Failed to resolve pointer.");
-        }
-    }
-    else {
-        spdlog::error("Stats: Player Deaths: Pattern scan failed.");
-    }
-
-    std::uint8_t* TotalKillsScanResult = Memory::PatternScan(exeModule, "48 ?? D8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 ?? ?? 48 89 ?? ?? ?? 48 8B ?? 08");
-    if (TotalKillsScanResult) {
-        std::uint8_t* totalKillsRef = Memory::GetAbsolute(TotalKillsScanResult + 0x0A);
-        std::uint8_t* totalKillsFirst = nullptr;
-        std::uint8_t* totalKillsSecond = nullptr;
-
-        if (ReadMemory(totalKillsRef, totalKillsFirst) && totalKillsFirst && ReadMemory(totalKillsFirst + 0x08, totalKillsSecond)) {
-            pTotalKills = totalKillsSecond + 0x00DC;
-            spdlog::info("Stats: Total Kills: Address is {:s}+{:x}", sExeName.c_str(), TotalKillsScanResult - reinterpret_cast<std::uint8_t*>(exeModule));
-        }
-        else {
-            spdlog::error("Stats: Total Kills: Failed to resolve pointer.");
-        }
-    }
-    else {
-        spdlog::error("Stats: Total Kills: Pattern scan failed.");
-    }
-
-    if (!pPlayerDeaths || !pTotalKills)
-        return;
-
+    // Always start the worker. Runtime stat objects may not exist yet when
+    // SekiroFix itself is initialised.
     HANDLE statsHandle = CreateThread(NULL, 0, StatsThread, 0, NULL, 0);
     if (statsHandle)
         CloseHandle(statsHandle);
+    else
+        spdlog::error("Stats: Failed to create stats thread.");
 }
-
 void Framerate()
 {
     if (bUnlockFPS) 
